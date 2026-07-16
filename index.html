@@ -27,6 +27,33 @@
   }
   .serif { font-family: Georgia, "Times New Roman", serif; }
 
+  /* ---------- Login / setup ---------- */
+  .login-wrap {
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(160deg, var(--navy) 0%, var(--navy-2) 60%, #24486b 100%);
+    padding: 24px;
+  }
+  .login-card {
+    background: var(--card); border-radius: 16px; box-shadow: 0 24px 64px rgba(0,0,0,.35);
+    width: 100%; max-width: 430px; padding: 44px 40px 32px; text-align: center;
+  }
+  .brand-mark {
+    width: 52px; height: 52px; border-radius: 50%;
+    background: var(--navy); color: var(--gold-soft);
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 22px; letter-spacing: .5px; margin-bottom: 14px;
+  }
+  .login-card h1 { font-size: 24px; color: var(--navy); letter-spacing: .3px; }
+  .login-card .sub { color: var(--muted); font-size: 13.5px; margin: 4px 0 28px; }
+  .login-error { color: var(--red); font-size: 13px; min-height: 18px; margin-top: 10px; }
+  .login-note { color: var(--muted); font-size: 12px; margin-top: 18px; border-top: 1px dashed var(--line); padding-top: 14px; }
+  .login-foot { color: rgba(255,255,255,.55); font-size: 12px; text-align: center; position: fixed; bottom: 14px; left: 0; right: 0; }
+  .setup-list { list-style: none; text-align: left; margin: 18px 0 6px; }
+  .setup-list li { padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; margin-bottom: 8px; font-size: 13.5px; display: flex; gap: 10px; align-items: flex-start; }
+  .setup-list .ok { color: var(--green); font-weight: 700; }
+  .setup-list .todo { color: var(--red); font-weight: 700; }
+  .loading-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 14px; }
+
   .field { text-align: left; margin-bottom: 14px; }
   .field label { display: block; font-size: 12.5px; font-weight: 600; color: var(--muted); margin-bottom: 5px; letter-spacing: .3px; }
   .field input, .field select {
@@ -188,6 +215,11 @@ let db = DEFAULTS();
 const state = { viewer: "fund", tab: "overview", refreshing: false, lastMsg: "", lastSaved: 0 };
 let cloudMode = "unknown"; // "on" | "nostore" | "none"
 
+/* Auth: "boot" (checking) | "local" (opened as a file — no accounts) |
+   "setup" (deployed but not configured) | "login" | "in" (signed in) */
+const auth = { mode: "boot", role: null, name: null, cid: null, flags: {} };
+const isAdminUI = () => auth.mode === "local" || auth.role === "admin";
+
 /* ================= Local cache ================= */
 function store() {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(db)); } catch (e) { /* memory only */ }
@@ -206,13 +238,19 @@ let saveTimer = null;
 function storeAndSync() {
   db.at = Date.now();
   store();
+  if (auth.mode === "in" && auth.role !== "admin") return; // server rejects non-admin writes anyway
   clearTimeout(saveTimer);
   saveTimer = setTimeout(cloudSave, 700);
+}
+function sessionExpired() {
+  auth.mode = "login"; auth.role = null; auth.name = null; auth.cid = null;
+  render();
 }
 async function cloudLoad() {
   try {
     const r = await fetch("/api/state", { cache: "no-store" });
     if (r.status === 501) { cloudMode = "nostore"; return null; }
+    if (r.status === 401) { cloudMode = "on"; if (auth.mode === "in") sessionExpired(); return null; }
     if (!r.ok) throw new Error("http " + r.status);
     const j = await r.json();
     cloudMode = "on";
@@ -220,12 +258,13 @@ async function cloudLoad() {
   } catch (e) { if (cloudMode === "unknown") cloudMode = "none"; return null; }
 }
 async function cloudSave() {
-  if (cloudMode !== "on") return;
+  if (cloudMode !== "on" || auth.mode !== "in" || auth.role !== "admin") return;
   try {
     const r = await fetch("/api/state", {
       method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(db)
     });
     if (r.ok) { state.lastSaved = Date.now(); updateBanner(); }
+    else if (r.status === 401) sessionExpired();
   } catch (e) { /* retried on next edit */ }
 }
 async function pollSync() {
@@ -240,9 +279,13 @@ async function pollSync() {
   }
 }
 function bannerText() {
-  if (cloudMode === "on") return "Synced across devices" + (state.lastSaved ? " · saved " + timeStr(state.lastSaved) : "") + " · prototype, no sign-in — anyone with the link can view and edit";
-  if (cloudMode === "nostore") return "Deployed, but cloud sync is OFF — create a Blob store in Vercel and redeploy (README step 4)";
-  return "Running locally — changes save in this browser only";
+  if (auth.mode === "in") {
+    return "Signed in as " + auth.name +
+      (auth.role === "admin" ? " · edits sync to all devices" : " · your account only") +
+      (state.lastSaved ? " · saved " + timeStr(state.lastSaved) : "");
+  }
+  if (cloudMode === "nostore") return "Deployed, but not configured — see the setup checklist";
+  return "Local preview — no sign-in; changes save in this browser only. Deploy to enable accounts.";
 }
 function updateBanner() { const el = $("sync-line"); if (el) el.textContent = bannerText(); }
 
@@ -374,7 +417,16 @@ async function refreshOne(t) {
 function positionsValue() { return db.holdings.reduce((s,h) => s + h.sh * priceOf(h), 0); }
 function marketValue() { return positionsValue() + (db.cash || 0); }
 function principalOf(c, uptoYm) { return c.contributions.reduce((s,k) => s + ((!uptoYm || k.ym <= uptoYm) ? k.amount : 0), 0); }
-function totalPrincipal(uptoYm) { return db.clients.reduce((s,c) => s + principalOf(c, uptoYm), 0); }
+function totalPrincipal(uptoYm) {
+  // Investor sessions get an aggregated principal series instead of other
+  // investors' records, so their ownership % still computes correctly.
+  if (db.tpSeries && db.tpSeries.length) {
+    let best = 0;
+    for (const p of db.tpSeries) { if (!uptoYm || p.ym <= uptoYm) best = p.total; else break; }
+    return best;
+  }
+  return db.clients.reduce((s,c) => s + principalOf(c, uptoYm), 0);
+}
 function fracOf(c, uptoYm) { const tp = totalPrincipal(uptoYm); return tp ? principalOf(c, uptoYm) / tp : 0; }
 
 function clientStats(c) {
@@ -534,8 +586,47 @@ function donutHTML(segs) {
 /* ================= Views ================= */
 function render() {
   try { document.title = db.fund.name + " — Investor Portal"; } catch (e) {}
+  if (auth.mode === "boot") { $("root").innerHTML = `<div class="loading-wrap">Loading portal…</div>`; return; }
+  if (auth.mode === "setup") { $("root").innerHTML = setupView(); return; }
+  if (auth.mode === "login") { $("root").innerHTML = loginView(); return; }
   $("root").innerHTML = shellView();
   afterRender();
+}
+
+function loginView() {
+  return `
+  <div class="login-wrap"><div>
+    <div class="login-card">
+      <div class="brand-mark serif">${esc((db.fund.name || "F").split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase())}</div>
+      <h1 class="serif">${esc(db.fund.name)}</h1>
+      <div class="sub">Investor Portal</div>
+      <div class="field"><label>EMAIL</label><input id="li-email" type="text" placeholder="you@example.com" autocomplete="username"></div>
+      <div class="field"><label>PASSWORD</label><input id="li-pass" type="password" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')app.signIn()"></div>
+      <button class="btn btn-primary" id="li-btn" style="width:100%;margin-top:6px" onclick="app.signIn()">Sign in</button>
+      <div class="login-error" id="li-err"></div>
+      <div class="login-note">Investors: your password comes from the fund manager.<br>Fund manager: sign in with the username <b>admin</b>.</div>
+    </div>
+    <div class="login-foot">Secured with signed session cookies · sessions last 7 days</div>
+  </div></div>`;
+}
+
+function setupView() {
+  const f = auth.flags || {};
+  const item = (ok, label) => `<li><span class="${ok?'ok':'todo'}">${ok?"✓":"•"}</span><span>${label}</span></li>`;
+  return `
+  <div class="login-wrap"><div>
+    <div class="login-card">
+      <div class="brand-mark serif">⚙</div>
+      <h1 class="serif">Almost there</h1>
+      <div class="sub">Finish setup in your Vercel project</div>
+      <ul class="setup-list">
+        ${item(f.blob, "<b>Blob storage</b> — Storage tab → Create Database → Blob → Connect to this project")}
+        ${item(f.admin, "<b>Admin password</b> — Settings → Environment Variables → add <b>ADMIN_PASSWORD</b> (all environments)")}
+        ${item(false, "<b>Redeploy</b> — Deployments → ⋯ → Redeploy, then reload this page")}
+      </ul>
+      <div class="login-note">Full instructions are in the README. Nothing is accessible until setup is complete.</div>
+    </div>
+  </div></div>`;
 }
 function renderStatusOnly() { const el = $("px-status"); if (el) el.innerHTML = statusHTML(); }
 
@@ -546,8 +637,18 @@ function statusHTML() {
 }
 
 function shellView() {
-  const tabs = [["overview","Overview"],["holdings","Holdings"],["admin","Admin"]];
-  const body = state.tab === "holdings" ? holdingsView() : state.tab === "admin" ? adminView() : overviewView();
+  const admin = isAdminUI();
+  const tabs = [["overview","Overview"],["holdings","Holdings"]];
+  if (admin) tabs.push(["admin","Admin"]);
+  if (!admin && state.tab === "admin") state.tab = "overview";
+  const body = state.tab === "holdings" ? holdingsView() : (state.tab === "admin" && admin) ? adminView() : overviewView();
+  const switcher = admin ? `
+    <select class="viewer-sel" onchange="app.setViewer(this.value)">
+      <option value="fund" ${state.viewer==="fund"?"selected":""}>Viewing: whole fund</option>
+      ${db.clients.map(c => `<option value="${c.id}" ${String(state.viewer)===String(c.id)?"selected":""}>Viewing: ${esc(c.name)}</option>`).join("")}
+    </select>` : "";
+  const signout = auth.mode === "in"
+    ? `<a style="color:rgba(255,255,255,.75);cursor:pointer;font-size:13.5px;white-space:nowrap" onclick="app.signOut()">Sign out</a>` : "";
   return `
   <div class="demo-banner" id="sync-line">${esc(bannerText())}</div>
   <div class="topbar">
@@ -555,10 +656,8 @@ function shellView() {
     <div class="nav-tabs">
       ${tabs.map(([k,l]) => `<button class="${state.tab===k?'active':''}" onclick="app.tab('${k}')">${l}</button>`).join("")}
     </div>
-    <select class="viewer-sel" onchange="app.setViewer(this.value)">
-      <option value="fund" ${state.viewer==="fund"?"selected":""}>Viewing: whole fund</option>
-      ${db.clients.map(c => `<option value="${c.id}" ${String(state.viewer)===String(c.id)?"selected":""}>Viewing: ${esc(c.name)}</option>`).join("")}
-    </select>
+    ${switcher}
+    ${signout}
   </div>
   <div class="page">${body}</div>
   <div class="foot-note">
@@ -735,10 +834,11 @@ function adminView() {
       <td class="num ${pctClass(st.gain)}">${fmtPct(st.gainPct)}</td>
       <td style="text-align:right;white-space:nowrap">
         <button class="link-btn" onclick="app.setViewer('${c.id}')">View portal</button>
+        <button class="link-btn" style="margin-left:10px" onclick="app.setPw(${c.id})">Set password</button>
         <button class="del-btn" title="Remove investor" onclick="app.delClient(${c.id})">✕</button>
       </td></tr>`; }).join("")}
     </tbody></table>
-    <div class="hint" style="margin-top:8px;margin-bottom:0">Share a direct link with an investor: add <b>?investor=their-email</b> to the site URL.</div>
+    <div class="hint" style="margin-top:8px;margin-bottom:0"><b>Set password</b> generates a sign-in password for that investor (shown once — send it to them with the site link). They sign in with their email and see only their own account.</div>
 
     <h3 style="margin-top:22px">Add investor / contribution</h3>
     <div class="hint">Use an existing email to record an additional contribution.</div>
@@ -775,19 +875,55 @@ function adminView() {
 
 /* ================= Actions ================= */
 window.app = {
-  tab(t) { state.tab = t; render(); },
+  tab(t) { if (t === "admin" && !isAdminUI()) t = "overview"; state.tab = t; render(); },
   setViewer(v) {
+    if (!isAdminUI()) return; // investors are locked to their own account
     state.viewer = v;
-    try {
-      const c = currentClient();
-      const url = new URL(location.href);
-      if (c) url.searchParams.set("investor", c.email); else url.searchParams.delete("investor");
-      history.replaceState(null, "", url);
-    } catch (e) {}
-    if (state.tab === "admin" && currentClient()) state.tab = "overview";
     render();
   },
   refresh() { refreshAll(); },
+
+  async signIn() {
+    const email = ($("li-email") ? $("li-email").value : "").trim();
+    const pw = $("li-pass") ? $("li-pass").value : "";
+    const btn = $("li-btn"); if (btn) { btn.disabled = true; btn.textContent = "Signing in…"; }
+    const fail = (msg) => { const e = $("li-err"); if (e) e.textContent = msg; if (btn) { btn.disabled = false; btn.textContent = "Sign in"; } };
+    if (!email || !pw) return fail("Enter your email and password.");
+    try {
+      const r = await fetch("/api/auth", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "login", email, password: pw })
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        return fail(j.error === "no-password"
+          ? "No password has been set for this account yet — ask the fund manager."
+          : "Email or password incorrect.");
+      }
+      enterApp(j);
+    } catch (e) { fail("Could not reach the server — try again."); }
+  },
+  async signOut() {
+    try { await fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "logout" }) }); } catch (e) {}
+    sessionExpired();
+  },
+  async setPw(cid) {
+    const c = db.clients.find(x => String(x.id) === String(cid));
+    if (!c) return;
+    if (auth.mode !== "in" || auth.role !== "admin") {
+      flash("inv-flash", "Investor passwords can only be set on the deployed, signed-in site.", true); return;
+    }
+    const pw = genPw();
+    try {
+      const r = await fetch("/api/auth", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "set-password", cid: String(cid), password: pw })
+      });
+      if (r.status === 401) return sessionExpired();
+      if (!r.ok) throw new Error("http " + r.status);
+      flashHTML("inv-flash", "Password for <b>" + esc(c.name) + "</b>: <b style=\"font-size:15px\">" + esc(pw) + "</b> — copy it now, it won't be shown again.");
+    } catch (e) { flash("inv-flash", "Could not set the password — try again.", true); }
+  },
 
   editFund(k, v) {
     v = v.trim();
@@ -819,14 +955,17 @@ window.app = {
     if (!validYm(ym)) { flash("inv-flash", "Enter month as YYYY-MM.", true); return; }
     if (!(amt > 0)) { flash("inv-flash", "Enter a valid amount.", true); return; }
     let c = db.clients.find(x => x.email === email);
+    let isNew = false;
     if (c) c.contributions.push({ ym, amount: amt });
     else {
       if (!name || !email.includes("@")) { flash("inv-flash", "Enter a name and valid email.", true); return; }
       c = { id: Date.now(), name, email, contributions: [{ ym, amount: amt }] };
       db.clients.push(c);
+      isNew = true;
     }
     storeAndSync(); render();
     flash("inv-flash", fmtMoney(amt) + " contribution recorded for " + c.name + ".");
+    if (isNew && auth.mode === "in" && auth.role === "admin") this.setPw(c.id); // show their password right away
   },
   delClient(id) { db.clients = db.clients.filter(c => c.id !== id); if (String(state.viewer) === String(id)) state.viewer = "fund"; storeAndSync(); render(); },
   setKey() {
@@ -846,6 +985,19 @@ function flash(id, msg, isErr) {
   el.textContent = msg;
   el.className = "flash" + (isErr ? " warn" : "");
 }
+function flashHTML(id, html) {
+  const el = $(id); if (!el) return;
+  el.innerHTML = html;
+  el.className = "flash";
+}
+function genPw() {
+  const chars = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789";
+  const rnd = new Uint32Array(10);
+  try { crypto.getRandomValues(rnd); } catch (e) { for (let i = 0; i < 10; i++) rnd[i] = Math.floor(Math.random() * 1e9); }
+  let out = "";
+  for (let i = 0; i < 10; i++) out += chars[rnd[i] % chars.length];
+  return out;
+}
 
 function afterRender() {
   if (state.tab === "overview") {
@@ -856,30 +1008,46 @@ function afterRender() {
 }
 
 /* ================= Boot ================= */
-loadStore();
-try {
-  if (typeof location !== "undefined" && location.search) {
-    const inv = new URLSearchParams(location.search).get("investor");
-    if (inv) {
-      const c = db.clients.find(x => x.email.toLowerCase() === inv.trim().toLowerCase());
-      if (c) state.viewer = String(c.id);
-    }
-  }
-} catch (e) {}
-render();
-(async () => {
+async function enterApp(sess) {
+  auth.mode = "in"; auth.role = sess.role; auth.name = sess.name; auth.cid = sess.cid;
+  cloudMode = "on";
+  if (auth.role === "investor") { state.viewer = String(sess.cid); state.tab = "overview"; }
+  else state.viewer = "fund";
   const remote = await cloudLoad();
-  if (remote && Array.isArray(remote.holdings) && Array.isArray(remote.clients)) {
-    if ((remote.at || 0) >= (db.at || 0)) { db = Object.assign(DEFAULTS(), remote); store(); render(); }
-    else cloudSave(); // local copy is newer — push it up
-  } else if (cloudMode === "on") {
+  if (remote && Array.isArray(remote.holdings)) {
+    db = Object.assign(DEFAULTS(), remote); store();
+  } else if (auth.role === "admin") {
     db.at = db.at || Date.now();
-    cloudSave(); // first run: seed cloud with local/sample data
+    cloudSave(); // first run: seed the cloud with local/sample data
   }
-  updateBanner();
-  if (typeof fetch === "function") refreshAll();
+  render();
+  refreshAll();
+}
+loadStore();
+render(); // loading screen while the session is checked
+(async () => {
+  if (typeof fetch !== "function") { auth.mode = "local"; render(); return; }
+  let st = null;
+  try {
+    const r = await fetch("/api/auth", { cache: "no-store" });
+    if (!r.ok && r.status !== 501) throw new Error("no api");
+    st = await r.json();
+  } catch (e) {
+    // No API — opened as a local file / static preview: open mode, browser-only saves
+    auth.mode = "local"; cloudMode = "none";
+    render(); refreshAll();
+    return;
+  }
+  auth.flags = st || {};
+  if (!st || !st.blob || !st.admin) { cloudMode = "nostore"; auth.mode = "setup"; render(); return; }
+  if (!st.authed) { auth.mode = "login"; render(); return; }
+  enterApp(st);
 })();
-setInterval(() => { if (typeof document.visibilityState !== "string" || document.visibilityState === "visible") refreshAll(); }, 5 * 60 * 1000);
+setInterval(() => {
+  if (auth.mode !== "in" && auth.mode !== "local") return;
+  if (typeof document.visibilityState === "string" && document.visibilityState !== "visible") return;
+  refreshAll();
+}, 5 * 60 * 1000);
 setInterval(pollSync, 60 * 1000);
 </script>
 </body>

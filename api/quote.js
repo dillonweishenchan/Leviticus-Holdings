@@ -1,6 +1,8 @@
 // Server-side quote proxy: /api/quote?symbols=SPY,AAPL,BRK-B
 // Fetches delayed public quotes + 2y monthly history from Yahoo Finance
 // (server-side, so no browser CORS issues). Cached ~60s per warm instance.
+// Requires a signed-in session so the proxy can't be abused by outsiders.
+import { readSession } from "../lib/auth.js";
 
 const TTL_MS = 60_000;
 const cache = new Map(); // symbol -> { at, data }
@@ -51,6 +53,7 @@ async function fetchSymbol(sym) {
 }
 
 export default async function handler(req, res) {
+  if (!readSession(req)) return res.status(401).json({ error: "unauthorized" });
   const raw = (req.query && req.query.symbols) || "";
   const symbols = [...new Set(
     String(raw).split(",").map(s => s.trim().toUpperCase())
