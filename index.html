@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Investor Portal</title>
+<style>
+  :root {
+    --navy: #10283f;
+    --navy-2: #1b3a58;
+    --gold: #b08d4a;
+    --gold-soft: #d9c39a;
+    --bg: #f6f5f1;
+    --card: #ffffff;
+    --ink: #22303c;
+    --muted: #6b7a88;
+    --line: #e6e2d8;
+    --green: #2e7d5b;
+    --red: #b4453a;
+    --radius: 12px;
+    --shadow: 0 1px 2px rgba(16,40,63,.06), 0 8px 24px rgba(16,40,63,.07);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg); color: var(--ink); font-size: 15px; line-height: 1.5;
+  }
+  .serif { font-family: Georgia, "Times New Roman", serif; }
+
+  .field { text-align: left; margin-bottom: 14px; }
+  .field label { display: block; font-size: 12.5px; font-weight: 600; color: var(--muted); margin-bottom: 5px; letter-spacing: .3px; }
+  .field input, .field select {
+    width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px;
+    font-size: 14.5px; background: #fcfbf9; color: var(--ink); outline: none;
+  }
+  .field input:focus, .field select:focus { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(176,141,74,.15); }
+  .btn {
+    display: inline-block; border: none; cursor: pointer; border-radius: 8px;
+    padding: 11px 18px; font-size: 14.5px; font-weight: 600; letter-spacing: .2px;
+  }
+  .btn-primary { background: var(--navy); color: #fff; }
+  .btn-primary:hover { background: var(--navy-2); }
+  .btn-gold { background: var(--gold); color: #fff; }
+  .btn-gold:hover { filter: brightness(1.06); }
+  .btn-ghost { background: transparent; color: var(--navy); border: 1px solid var(--line); }
+  .btn-ghost:hover { background: #f1efe8; }
+  .btn-sm { padding: 6px 12px; font-size: 13px; }
+  .btn[disabled] { opacity: .55; cursor: default; }
+
+  /* ---------- App shell ---------- */
+  .topbar {
+    background: var(--navy); color: #fff; padding: 0 28px;
+    display: flex; align-items: center; gap: 26px; height: 62px;
+    position: sticky; top: 0; z-index: 20; box-shadow: 0 2px 12px rgba(16,40,63,.25);
+  }
+  .topbar .logo { display: flex; align-items: center; gap: 10px; font-size: 17px; letter-spacing: .4px; white-space: nowrap; }
+  .topbar .logo .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--gold); display: inline-block; }
+  .nav-tabs { display: flex; gap: 4px; flex: 1; }
+  .nav-tabs button {
+    background: transparent; border: none; color: rgba(255,255,255,.72); cursor: pointer;
+    font-size: 14px; font-weight: 600; padding: 8px 14px; border-radius: 7px;
+  }
+  .nav-tabs button:hover { color: #fff; background: rgba(255,255,255,.08); }
+  .nav-tabs button.active { color: #fff; background: rgba(255,255,255,.14); }
+  .viewer-sel {
+    background: rgba(255,255,255,.1); color: #fff; border: 1px solid rgba(255,255,255,.25);
+    border-radius: 8px; padding: 7px 10px; font-size: 13.5px; font-weight: 600; outline: none; max-width: 220px;
+  }
+  .viewer-sel option { color: var(--ink); }
+
+  .demo-banner {
+    background: #fdf6e7; border-bottom: 1px solid #eadfc4; color: #7a5f2e;
+    font-size: 12.5px; text-align: center; padding: 6px 16px;
+  }
+  .page { max-width: 1120px; margin: 0 auto; padding: 32px 28px 60px; }
+  .page-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 22px; }
+  .page-head h2 { font-size: 24px; color: var(--navy); font-weight: 650; }
+  .asof { color: var(--muted); font-size: 13px; display: flex; align-items: center; gap: 10px; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); gap: 16px; margin-bottom: 26px; }
+  .card {
+    background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 20px 22px;
+    border-top: 3px solid transparent;
+  }
+  .card.accent { border-top-color: var(--gold); }
+  .card .k { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .9px; margin-bottom: 8px; }
+  .card .v { font-size: 25px; font-weight: 700; color: var(--navy); letter-spacing: .2px; }
+  .card .s { font-size: 13px; color: var(--muted); margin-top: 4px; }
+  .pos { color: var(--green); } .neg { color: var(--red); }
+
+  .panel { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px; margin-bottom: 26px; }
+  .panel h3 { font-size: 16px; color: var(--navy); margin-bottom: 4px; }
+  .panel .hint { font-size: 13px; color: var(--muted); margin-bottom: 16px; }
+
+  .chart-box { position: relative; }
+  .chart-tip {
+    position: absolute; pointer-events: none; background: var(--navy); color: #fff;
+    font-size: 12.5px; padding: 7px 11px; border-radius: 7px; white-space: nowrap;
+    transform: translate(-50%, -115%); display: none; box-shadow: 0 4px 14px rgba(0,0,0,.25); z-index: 5;
+  }
+  .chart-tip .t { color: var(--gold-soft); font-size: 11px; display: block; }
+  .chart-legend { display: flex; gap: 18px; font-size: 12.5px; color: var(--muted); margin-top: 8px; }
+  .chart-legend span { display: inline-flex; align-items: center; gap: 7px; }
+  .cl-line { width: 20px; height: 3px; border-radius: 2px; background: var(--gold); display: inline-block; }
+  .cl-dash { width: 20px; height: 0; border-top: 2.5px dashed var(--navy); display: inline-block; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; font-size: 11.5px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); font-weight: 700; padding: 8px 10px; border-bottom: 2px solid var(--line); }
+  td { padding: 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .pill { display: inline-block; font-size: 11.5px; font-weight: 600; padding: 3px 10px; border-radius: 999px; background: #eef1f4; color: #46586a; white-space: nowrap; }
+  .badge { display: inline-block; font-size: 10.5px; font-weight: 700; letter-spacing: .5px; padding: 2px 8px; border-radius: 999px; text-transform: uppercase; }
+  .b-live { background: #e5f2ec; color: #2e7d5b; }
+  .b-man  { background: #f0ede4; color: #8a8069; }
+  .sub-num { font-size: 11.5px; display: block; }
+  .tkr { font-size: 12px; color: var(--muted); }
+
+  .ret-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; }
+  .ret-cell { background: #faf9f5; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; text-align: center; }
+  .ret-cell .rk { font-size: 11.5px; color: var(--muted); font-weight: 700; letter-spacing: .6px; text-transform: uppercase; }
+  .ret-cell .rv { font-size: 19px; font-weight: 700; margin-top: 3px; }
+  .ret-hero { display: flex; align-items: baseline; gap: 14px; margin-bottom: 16px; flex-wrap: wrap; }
+  .ret-hero .big { font-size: 34px; font-weight: 750; }
+  .ret-hero .cap { color: var(--muted); font-size: 13.5px; }
+
+  .split { display: grid; grid-template-columns: 320px 1fr; gap: 26px; align-items: start; }
+  @media (max-width: 820px) { .split { grid-template-columns: 1fr; } }
+  .legend { list-style: none; margin-top: 14px; }
+  .legend li { display: flex; align-items: center; gap: 9px; font-size: 13.5px; padding: 5px 0; }
+  .legend .sw { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+  .legend .lw { margin-left: auto; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  /* Admin */
+  .inline-form { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+  .inline-form .field { margin-bottom: 0; flex: 1; min-width: 120px; }
+  .tbl-input { width: 100%; border: 1px solid transparent; background: transparent; font-size: 14px; padding: 5px 6px; border-radius: 6px; color: var(--ink); font-family: inherit; }
+  .tbl-input:hover { border-color: var(--line); background: #fcfbf9; }
+  .tbl-input:focus { border-color: var(--gold); background: #fff; outline: none; }
+  .tbl-input.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .del-btn { background: none; border: none; color: #b9b2a3; cursor: pointer; font-size: 16px; padding: 2px 6px; border-radius: 5px; }
+  .del-btn:hover { color: var(--red); background: #faeceb; }
+  .link-btn { background: none; border: none; color: var(--gold); cursor: pointer; font-size: 13px; font-weight: 600; padding: 0; }
+  .link-btn:hover { text-decoration: underline; }
+  .flash { font-size: 13px; color: var(--green); min-height: 18px; margin-top: 8px; }
+  .warn { color: var(--red); }
+  .muted { color: var(--muted); }
+  .foot-note { color: var(--muted); font-size: 12px; text-align: center; margin-top: 36px; line-height: 1.7; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+"use strict";
+
+/* =====================================================
+   DEFAULT SAMPLE DATA — everything is editable in Admin
+   ===================================================== */
+const STORE_KEY = "fund-portal-v3";
+const ASSET_CLASSES = ["US Equity","International Equity","Fixed Income","Alternatives","Cash"];
+
+const DEFAULTS = () => ({
+  at: 0, // last-edit timestamp, used for cross-device sync
+  fund: { name: "Harbor Point Capital", label: "Harbor Point Partners Fund, LP" },
+  cash: 400000,
+  key: "", // optional Finnhub API key (extra quote source)
+  holdings: [
+    { t:"SPY",   name:"SPDR S&P 500 ETF",         cls:"US Equity",            sh:3000, fb:560 },
+    { t:"AAPL",  name:"Apple Inc.",                cls:"US Equity",            sh:4000, fb:210 },
+    { t:"MSFT",  name:"Microsoft Corp.",           cls:"US Equity",            sh:2500, fb:440 },
+    { t:"NVDA",  name:"NVIDIA Corp.",              cls:"US Equity",            sh:3000, fb:135 },
+    { t:"BRK-B", name:"Berkshire Hathaway Cl. B",  cls:"US Equity",            sh:1500, fb:500 },
+    { t:"EFA",   name:"iShares MSCI EAFE ETF",     cls:"International Equity", sh:6000, fb:82  },
+    { t:"AGG",   name:"iShares Core US Bond ETF",  cls:"Fixed Income",         sh:8000, fb:99  },
+    { t:"GLD",   name:"SPDR Gold Shares",          cls:"Alternatives",         sh:3500, fb:310 }
+  ],
+  clients: [
+    { id: 1, name: "Alex Morgan", email: "alex@example.com",
+      contributions: [ { ym: "2023-01", amount: 1500000 }, { ym: "2025-01", amount: 1100000 } ] },
+    { id: 2, name: "Jordan Lee",  email: "jordan@example.com",
+      contributions: [ { ym: "2024-07", amount: 3500000 } ] }
+  ],
+  quotes: {} // ticker -> { price, prev, name, hist:[{ym,close}], src, at }
+});
+
+let db = DEFAULTS();
+const state = { viewer: "fund", tab: "overview", refreshing: false, lastMsg: "", lastSaved: 0 };
+let cloudMode = "unknown"; // "on" | "nostore" | "none"
+
+/* ================= Local cache ================= */
+function store() {
+  try { localStorage.setItem(STORE_KEY, JSON.stringify(db)); } catch (e) { /* memory only */ }
+}
+function loadStore() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (!raw) return;
+    const d = JSON.parse(raw);
+    if (d && Array.isArray(d.holdings) && Array.isArray(d.clients)) db = Object.assign(DEFAULTS(), d);
+  } catch (e) { /* ignore */ }
+}
+
+/* ================= Cloud sync (deployed on Vercel) ================= */
+let saveTimer = null;
+function storeAndSync() {
+  db.at = Date.now();
+  store();
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(cloudSave, 700);
+}
+async function cloudLoad() {
+  try {
+    const r = await fetch("/api/state", { cache: "no-store" });
+    if (r.status === 501) { cloudMode = "nostore"; return null; }
+    if (!r.ok) throw new Error("http " + r.status);
+    const j = await r.json();
+    cloudMode = "on";
+    return j && j.state ? j.state : null;
+  } catch (e) { if (cloudMode === "unknown") cloudMode = "none"; return null; }
+}
+async function cloudSave() {
+  if (cloudMode !== "on") return;
+  try {
+    const r = await fetch("/api/state", {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(db)
+    });
+    if (r.ok) { state.lastSaved = Date.now(); updateBanner(); }
+  } catch (e) { /* retried on next edit */ }
+}
+async function pollSync() {
+  if (cloudMode !== "on") return;
+  if (typeof document.visibilityState === "string" && document.visibilityState !== "visible") return;
+  const ae = document.activeElement;
+  if (ae && /INPUT|SELECT|TEXTAREA/.test(ae.tagName || "")) return; // don't clobber while typing
+  const remote = await cloudLoad();
+  if (remote && remote.at && remote.at > (db.at || 0)) {
+    db = Object.assign(DEFAULTS(), remote);
+    store(); render();
+  }
+}
+function bannerText() {
+  if (cloudMode === "on") return "Synced across devices" + (state.lastSaved ? " · saved " + timeStr(state.lastSaved) : "") + " · prototype, no sign-in — anyone with the link can view and edit";
+  if (cloudMode === "nostore") return "Deployed, but cloud sync is OFF — create a Blob store in Vercel and redeploy (README step 4)";
+  return "Running locally — changes save in this browser only";
+}
+function updateBanner() { const el = $("sync-line"); if (el) el.textContent = bannerText(); }
+
+/* ================= Helpers ================= */
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+const fmtMoney = (v) => v.toLocaleString("en-US", { style:"currency", currency:"USD", maximumFractionDigits:0 });
+const fmtPrice = (v) => v.toLocaleString("en-US", { style:"currency", currency:"USD", minimumFractionDigits:2, maximumFractionDigits:2 });
+const fmtMoneyC = (v) => Math.abs(v) >= 1e6 ? "$" + (v/1e6).toFixed(2) + "M" : Math.abs(v) >= 1e3 ? "$" + (v/1e3).toFixed(0) + "K" : "$" + v.toFixed(0);
+const fmtPct = (v, signed=true) => (signed && v > 0 ? "+" : "") + (v*100).toFixed(1) + "%";
+const pctClass = (v) => v >= 0 ? "pos" : "neg";
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const monthLabel = (ym) => { const [y,m] = ym.split("-"); return MONTHS[+m-1] + " " + y; };
+const ymOf = (d) => d.getUTCFullYear() + "-" + String(d.getUTCMonth()+1).padStart(2,"0");
+const nowYm = () => ymOf(new Date());
+const validYm = (s) => /^\d{4}-(0[1-9]|1[0-2])$/.test(s);
+const timeStr = (t) => new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+function uniqueTickers() { return [...new Set(db.holdings.map(h => h.t.trim().toUpperCase()).filter(Boolean))]; }
+function quote(t) { return db.quotes[t.trim().toUpperCase()]; }
+function priceOf(h) { const q = quote(h.t); return q && q.price > 0 ? q.price : (h.fb || 0); }
+function isLive(h) { const q = quote(h.t); return !!(q && q.price > 0); }
+function currentClient() { return db.clients.find(c => String(c.id) === String(state.viewer)) || null; }
+
+/* ================= Live quotes ================= */
+function yahooUrl(t) {
+  return "https://query1.finance.yahoo.com/v8/finance/chart/" + encodeURIComponent(t) + "?range=2y&interval=1mo";
+}
+function parseYahoo(j) {
+  const res = j && j.chart && j.chart.result && j.chart.result[0];
+  if (!res || !res.meta || !(res.meta.regularMarketPrice > 0)) throw new Error("bad payload");
+  const m = res.meta;
+  const closes = (res.indicators && res.indicators.quote && res.indicators.quote[0] && res.indicators.quote[0].close) || [];
+  const hist = [];
+  (res.timestamp || []).forEach((ts, i) => {
+    const c = closes[i];
+    if (c != null && c > 0) {
+      const ym = ymOf(new Date(ts * 1000));
+      const last = hist[hist.length-1];
+      if (last && last.ym === ym) last.close = c; else hist.push({ ym, close: c });
+    }
+  });
+  return { price: m.regularMarketPrice, prev: m.chartPreviousClose || m.previousClose || null,
+           name: m.shortName || m.longName || null, hist };
+}
+function parseFinnhub(j) {
+  if (!j || !(j.c > 0)) throw new Error("bad payload");
+  return { price: j.c, prev: j.pc || null, name: null, hist: null };
+}
+async function getJSON(url, ms) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), ms || 9000);
+  try {
+    const r = await fetch(url, { signal: ctl.signal });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    return await r.json();
+  } finally { clearTimeout(timer); }
+}
+/* Fallback chain used when the site API is unavailable (e.g. opened as a local file) */
+async function fetchTicker(t) {
+  const y = yahooUrl(t);
+  const routes = [];
+  if (db.key) routes.push({ src: "Finnhub", url: "https://finnhub.io/api/v1/quote?symbol=" + encodeURIComponent(t) + "&token=" + encodeURIComponent(db.key), parse: parseFinnhub });
+  routes.push(
+    { src: "Yahoo Finance",     url: y, parse: parseYahoo },
+    { src: "Yahoo (proxy)",     url: "https://corsproxy.io/?url=" + encodeURIComponent(y), parse: parseYahoo },
+    { src: "Yahoo (proxy alt)", url: "https://api.allorigins.win/raw?url=" + encodeURIComponent(y), parse: parseYahoo }
+  );
+  let got = null;
+  for (const r of routes) {
+    try { got = Object.assign(r.parse(await getJSON(r.url)), { src: r.src }); break; } catch (e) { /* next route */ }
+  }
+  if (!got) return null;
+  if (!got.hist) {
+    for (const u of [y, "https://corsproxy.io/?url=" + encodeURIComponent(y), "https://api.allorigins.win/raw?url=" + encodeURIComponent(y)]) {
+      try { got.hist = parseYahoo(await getJSON(u)).hist; break; } catch (e) { /* keep going */ }
+    }
+  }
+  return got;
+}
+function applyQuote(t, r) {
+  const T = t.trim().toUpperCase();
+  const old = db.quotes[T] || {};
+  db.quotes[T] = { price: r.price, prev: r.prev, name: r.name || old.name || null,
+                   hist: (r.hist && r.hist.length ? r.hist : old.hist) || null, src: r.src, at: Date.now() };
+  db.holdings.forEach(x => {
+    if (x.t.trim().toUpperCase() === T) {
+      x.fb = r.price; // keep last-known price as offline fallback
+      if (r.name && (!x.name || x.name === x.t)) x.name = r.name;
+    }
+  });
+}
+async function refreshAll() {
+  if (state.refreshing) return;
+  const tickers = uniqueTickers();
+  if (!tickers.length) return;
+  state.refreshing = true; renderStatusOnly();
+  let batch = {};
+  try {
+    const r = await fetch("/api/quote?symbols=" + encodeURIComponent(tickers.join(",")), { cache: "no-store" });
+    if (r.ok) batch = (await r.json()) || {};
+  } catch (e) { /* fall through to client-side chain */ }
+  const results = await Promise.all(tickers.map(async t => {
+    const b = batch[t];
+    if (b && b.price > 0) return Object.assign({}, b, { src: "site API" });
+    return fetchTicker(t).catch(() => null);
+  }));
+  let ok = 0;
+  results.forEach((r, i) => { if (r) { ok++; applyQuote(tickers[i], r); } });
+  state.refreshing = false;
+  state.lastMsg = ok === 0
+    ? "Live quotes unavailable — showing last-known prices"
+    : "Live: " + ok + "/" + tickers.length + " via " + (results.find(Boolean).src) + " · " + timeStr(Date.now());
+  if (ok) store(); // local cache only — quote refreshes don't overwrite cloud edits
+  render();
+}
+async function refreshOne(t) {
+  const T = t.trim().toUpperCase();
+  let r = null;
+  try {
+    const rr = await fetch("/api/quote?symbols=" + encodeURIComponent(T), { cache: "no-store" });
+    if (rr.ok) { const j = await rr.json(); if (j && j[T] && j[T].price > 0) r = Object.assign({}, j[T], { src: "site API" }); }
+  } catch (e) {}
+  if (!r) r = await fetchTicker(T).catch(() => null);
+  if (r) { applyQuote(T, r); store(); render(); }
+}
+
+/* ================= Portfolio math ================= */
+function positionsValue() { return db.holdings.reduce((s,h) => s + h.sh * priceOf(h), 0); }
+function marketValue() { return positionsValue() + (db.cash || 0); }
+function principalOf(c, uptoYm) { return c.contributions.reduce((s,k) => s + ((!uptoYm || k.ym <= uptoYm) ? k.amount : 0), 0); }
+function totalPrincipal(uptoYm) { return db.clients.reduce((s,c) => s + principalOf(c, uptoYm), 0); }
+function fracOf(c, uptoYm) { const tp = totalPrincipal(uptoYm); return tp ? principalOf(c, uptoYm) / tp : 0; }
+
+function clientStats(c) {
+  const mv = marketValue();
+  const principal = principalOf(c);
+  const frac = fracOf(c);
+  const value = frac * mv;
+  const gain = value - principal;
+  const firstYm = c.contributions.length ? c.contributions.map(k => k.ym).sort()[0] : null;
+  return { principal, frac, value, gain, gainPct: principal ? gain / principal : 0, firstYm };
+}
+function histClose(t, ym) {
+  const q = quote(t);
+  if (!q || !q.hist) return null;
+  let best = null;
+  for (const p of q.hist) { if (p.ym <= ym) best = p.close; else break; }
+  return best;
+}
+function fundSeries() {
+  const yms = new Set();
+  for (const t of uniqueTickers()) { const q = quote(t); if (q && q.hist) q.hist.forEach(p => yms.add(p.ym)); }
+  const months = [...yms].sort();
+  const cur = nowYm();
+  if (!months.includes(cur)) months.push(cur);
+  return months.map(ym => {
+    let v = db.cash || 0;
+    for (const h of db.holdings) {
+      const p = (ym === cur ? priceOf(h) : (histClose(h.t, ym) ?? priceOf(h)));
+      v += h.sh * p;
+    }
+    return { ym, label: monthLabel(ym), value: v, principal: totalPrincipal(ym) };
+  });
+}
+function clientSeries(c) {
+  return fundSeries()
+    .map(p => ({ ym: p.ym, label: p.label, value: fracOf(c, p.ym) * p.value, principal: principalOf(c, p.ym) }))
+    .filter(p => p.principal > 0);
+}
+function periodReturns(series) {
+  const out = {};
+  const n = series.length;
+  const L = n ? series[n-1].value : 0;
+  const back = (k) => (n > k ? L / series[n-1-k].value - 1 : null);
+  out["1 Mo"] = back(1); out["3 Mo"] = back(3); out["1 Yr"] = back(12);
+  let ytd = null;
+  if (n) {
+    const yr = series[n-1].ym.slice(0,4);
+    const prev = series.filter(p => p.ym < yr + "-01");
+    if (prev.length) ytd = L / prev[prev.length-1].value - 1;
+  }
+  out["YTD"] = ytd;
+  return out;
+}
+function classBreakdown() {
+  const m = {};
+  for (const h of db.holdings) m[h.cls] = (m[h.cls] || 0) + h.sh * priceOf(h);
+  if (db.cash) m["Cash"] = (m["Cash"] || 0) + db.cash;
+  const mv = marketValue() || 1;
+  return ASSET_CLASSES.filter(c => m[c]).map(c => ({ label: c, value: m[c] / mv * 100, mv: m[c] }));
+}
+
+/* ================= SVG Charts ================= */
+const DONUT_COLORS = ["#10283f","#b08d4a","#5b7f71","#8496a8","#c2703e","#cfc6b2"];
+const CH = { W: 920, H: 300, padL: 74, padR: 20, padT: 18, padB: 34 };
+
+function chartScales(series) {
+  const vals = series.map(p => p.value).concat(series.map(p => p.principal));
+  let min = Math.min(...vals), max = Math.max(...vals);
+  const span = (max - min) || Math.abs(max) || 1;
+  min -= span * .08; max += span * .08;
+  const X = (i) => CH.padL + (CH.W - CH.padL - CH.padR) * (series.length === 1 ? .5 : i / (series.length - 1));
+  const Y = (v) => CH.padT + (CH.H - CH.padT - CH.padB) * (1 - (v - min) / (max - min));
+  return { X, Y, min, max };
+}
+function areaChartHTML(series, id) {
+  if (series.length < 2) return "<p class='hint'>Performance history will appear once live prices load.</p>";
+  const { X, Y, min, max } = chartScales(series);
+  let line = "", step = "";
+  series.forEach((p,i) => { line += (i ? "L" : "M") + X(i).toFixed(1) + " " + Y(p.value).toFixed(1) + " "; });
+  series.forEach((p,i) => {
+    const x = X(i).toFixed(1), y = Y(p.principal).toFixed(1);
+    step += i === 0 ? "M" + x + " " + y + " " : "H" + x + " V" + y + " ";
+  });
+  const area = line + "L" + X(series.length-1).toFixed(1) + " " + (CH.H-CH.padB) + " L" + CH.padL + " " + (CH.H-CH.padB) + " Z";
+  let grid = "";
+  for (let g = 0; g <= 4; g++) {
+    const v = min + (max - min) * g / 4, y = Y(v).toFixed(1);
+    grid += `<line x1="${CH.padL}" y1="${y}" x2="${CH.W-CH.padR}" y2="${y}" stroke="#eceadf" stroke-width="1"/>`
+          + `<text x="${CH.padL-10}" y="${+y+4}" text-anchor="end" font-size="11.5" fill="#8a96a3">${fmtMoneyC(v)}</text>`;
+  }
+  let xlabels = "";
+  const stepN = Math.max(1, Math.ceil(series.length / 7));
+  series.forEach((p,i) => {
+    if (i % stepN === 0 || i === series.length-1)
+      xlabels += `<text x="${X(i).toFixed(1)}" y="${CH.H-10}" text-anchor="middle" font-size="11.5" fill="#8a96a3">${p.label}</text>`;
+  });
+  return `
+  <div class="chart-box" id="${id}-box">
+    <div class="chart-tip" id="${id}-tip"></div>
+    <svg id="${id}" viewBox="0 0 ${CH.W} ${CH.H}" style="width:100%;display:block">
+      <defs><linearGradient id="${id}-g" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#b08d4a" stop-opacity=".28"/>
+        <stop offset="100%" stop-color="#b08d4a" stop-opacity=".02"/>
+      </linearGradient></defs>
+      ${grid}
+      <path d="${area}" fill="url(#${id}-g)"/>
+      <path d="${step}" fill="none" stroke="#10283f" stroke-width="2" stroke-dasharray="5 4" opacity=".75"/>
+      <path d="${line}" fill="none" stroke="#b08d4a" stroke-width="2.5" stroke-linejoin="round"/>
+      <line id="${id}-cursor" x1="0" y1="${CH.padT}" x2="0" y2="${CH.H-CH.padB}" stroke="#10283f" stroke-width="1" stroke-dasharray="3 3" opacity="0"/>
+      <circle id="${id}-dot" r="4.5" fill="#10283f" stroke="#fff" stroke-width="2" opacity="0"/>
+      ${xlabels}
+      <rect x="${CH.padL}" y="${CH.padT}" width="${CH.W-CH.padL-CH.padR}" height="${CH.H-CH.padT-CH.padB}" fill="transparent" id="${id}-hover"/>
+    </svg>
+    <div class="chart-legend">
+      <span><span class="cl-line"></span>Market value</span>
+      <span><span class="cl-dash"></span>Principal invested</span>
+    </div>
+  </div>`;
+}
+function wireAreaChart(id, series) {
+  const svg = $(id); if (!svg || series.length < 2) return;
+  const hover = $(id+"-hover"), tip = $(id+"-tip"), cur = $(id+"-cursor"), dot = $(id+"-dot"), box = $(id+"-box");
+  const { X, Y } = chartScales(series);
+  hover.addEventListener("mousemove", (e) => {
+    const r = svg.getBoundingClientRect();
+    const sx = (e.clientX - r.left) * (CH.W / r.width);
+    const i = Math.max(0, Math.min(series.length-1, Math.round((sx-CH.padL)/(CH.W-CH.padL-CH.padR)*(series.length-1))));
+    const p = series[i], x = X(i), y = Y(p.value);
+    cur.setAttribute("x1",x); cur.setAttribute("x2",x); cur.setAttribute("opacity",1);
+    dot.setAttribute("cx",x); dot.setAttribute("cy",y); dot.setAttribute("opacity",1);
+    tip.innerHTML = `<span class="t">${esc(p.label)}</span>${fmtMoney(p.value)} <span style="opacity:.65">vs ${fmtMoney(p.principal)} principal</span>`;
+    tip.style.display = "block";
+    tip.style.left = (x / CH.W * 100) + "%";
+    tip.style.top = (y / CH.H * box.clientHeight) + "px";
+  });
+  hover.addEventListener("mouseleave", () => {
+    tip.style.display = "none"; cur.setAttribute("opacity",0); dot.setAttribute("opacity",0);
+  });
+}
+function donutHTML(segs) {
+  const R = 70, CX = 90, CY = 90, SW = 30, C = 2 * Math.PI * R;
+  const total = segs.reduce((s,x) => s + x.value, 0) || 1;
+  let off = -C/4, circles = "";
+  segs.forEach((s,i) => {
+    const frac = s.value / total, len = frac * C;
+    circles += `<circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="${DONUT_COLORS[i % DONUT_COLORS.length]}"
+      stroke-width="${SW}" stroke-dasharray="${Math.max(0,len-1.5).toFixed(2)} ${(C-len+1.5).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}"/>`;
+    off += len;
+  });
+  return `<svg viewBox="0 0 180 180" style="width:180px;max-width:100%;display:block;margin:0 auto">
+    ${circles}
+    <text x="${CX}" y="${CY-4}" text-anchor="middle" font-size="20" font-weight="700" fill="#10283f">${total.toFixed(0)}%</text>
+    <text x="${CX}" y="${CY+16}" text-anchor="middle" font-size="10.5" fill="#8a96a3" letter-spacing="1">ALLOCATED</text>
+  </svg>`;
+}
+
+/* ================= Views ================= */
+function render() {
+  try { document.title = db.fund.name + " — Investor Portal"; } catch (e) {}
+  $("root").innerHTML = shellView();
+  afterRender();
+}
+function renderStatusOnly() { const el = $("px-status"); if (el) el.innerHTML = statusHTML(); }
+
+function statusHTML() {
+  if (state.refreshing) return `<span class="muted">Refreshing quotes…</span>`;
+  return `<span class="muted">${esc(state.lastMsg || "Prices not yet refreshed")}</span>
+    <button class="btn btn-ghost btn-sm" onclick="app.refresh()">↻ Refresh</button>`;
+}
+
+function shellView() {
+  const tabs = [["overview","Overview"],["holdings","Holdings"],["admin","Admin"]];
+  const body = state.tab === "holdings" ? holdingsView() : state.tab === "admin" ? adminView() : overviewView();
+  return `
+  <div class="demo-banner" id="sync-line">${esc(bannerText())}</div>
+  <div class="topbar">
+    <div class="logo serif"><span class="dot"></span>${esc(db.fund.name)}</div>
+    <div class="nav-tabs">
+      ${tabs.map(([k,l]) => `<button class="${state.tab===k?'active':''}" onclick="app.tab('${k}')">${l}</button>`).join("")}
+    </div>
+    <select class="viewer-sel" onchange="app.setViewer(this.value)">
+      <option value="fund" ${state.viewer==="fund"?"selected":""}>Viewing: whole fund</option>
+      ${db.clients.map(c => `<option value="${c.id}" ${String(state.viewer)===String(c.id)?"selected":""}>Viewing: ${esc(c.name)}</option>`).join("")}
+    </select>
+  </div>
+  <div class="page">${body}</div>
+  <div class="foot-note">
+    ${esc(db.fund.label)} · Valuations use latest available market prices and are unaudited estimates.<br>
+    Performance = current market value of fund holdings vs. principal invested. Prototype — not investment, legal, or tax advice.
+  </div>`;
+}
+
+/* ---- Overview ---- */
+function overviewView() {
+  const mv = marketValue(), tp = totalPrincipal();
+  const c = currentClient();
+  if (!c) {
+    const gain = mv - tp, gp = tp ? gain/tp : 0;
+    const series = fundSeries();
+    const rets = periodReturns(series);
+    return `
+    <div class="page-head"><h2 class="serif">Fund overview</h2><span class="asof" id="px-status">${statusHTML()}</span></div>
+    <div class="cards">
+      <div class="card accent"><div class="k">Fund market value</div><div class="v">${fmtMoney(mv)}</div><div class="s">${db.holdings.length} positions + cash</div></div>
+      <div class="card"><div class="k">Principal invested</div><div class="v">${fmtMoney(tp)}</div><div class="s">${db.clients.length} investors</div></div>
+      <div class="card"><div class="k">Total gain</div><div class="v ${pctClass(gain)}">${fmtMoney(gain)}</div><div class="s ${pctClass(gain)}">${fmtPct(gp)} vs principal</div></div>
+      <div class="card"><div class="k">YTD</div><div class="v ${rets["YTD"]==null?'':pctClass(rets["YTD"])}">${rets["YTD"]==null?"—":fmtPct(rets["YTD"])}</div><div class="s">portfolio value</div></div>
+    </div>
+    <div class="panel">
+      <h3>Market value vs principal</h3>
+      <div class="hint">Monthly market value of current holdings (live price history) against cumulative investor principal</div>
+      ${areaChartHTML(series, "fchart")}
+    </div>
+    <div class="panel">
+      <h3>Performance</h3>
+      <div class="ret-hero"><span class="big ${pctClass(gp)}">${fmtPct(gp)}</span><span class="cap">total return — market value vs principal invested</span></div>
+      ${retGridHTML(rets)}
+    </div>`;
+  }
+  const st = clientStats(c);
+  const series = clientSeries(c);
+  const rets = periodReturns(series);
+  return `
+  <div class="page-head"><h2 class="serif">${esc(c.name)} — account overview</h2><span class="asof" id="px-status">${statusHTML()}</span></div>
+  <div class="cards">
+    <div class="card accent"><div class="k">Account value</div><div class="v">${fmtMoney(st.value)}</div><div class="s">${(st.frac*100).toFixed(1)}% ownership of fund</div></div>
+    <div class="card"><div class="k">Principal invested</div><div class="v">${fmtMoney(st.principal)}</div><div class="s">first investment ${st.firstYm ? monthLabel(st.firstYm) : "—"}</div></div>
+    <div class="card"><div class="k">Total gain</div><div class="v ${pctClass(st.gain)}">${fmtMoney(st.gain)}</div><div class="s ${pctClass(st.gain)}">${fmtPct(st.gainPct)} on principal</div></div>
+    <div class="card"><div class="k">Fund market value</div><div class="v">${fmtMoney(mv)}</div><div class="s">marked to latest prices</div></div>
+  </div>
+  <div class="panel">
+    <h3>Account value vs principal</h3>
+    <div class="hint">This investor's share of the fund's market value against the capital they've invested</div>
+    ${areaChartHTML(series, "cchart")}
+  </div>
+  <div class="panel">
+    <h3>Performance</h3>
+    <div class="ret-hero"><span class="big ${pctClass(st.gainPct)}">${fmtPct(st.gainPct)}</span><span class="cap">total return — account value vs principal</span></div>
+    ${retGridHTML(rets)}
+  </div>
+  <div class="panel">
+    <h3>Contribution history</h3><div class="hint">Capital invested into the fund</div>
+    <table><thead><tr><th>Date</th><th class="num">Amount</th></tr></thead>
+    <tbody>${c.contributions.map(k => `<tr><td>${monthLabel(k.ym)}</td><td class="num">${fmtMoney(k.amount)}</td></tr>`).join("")}</tbody></table>
+  </div>`;
+}
+function retGridHTML(rets) {
+  return `<div class="ret-grid">${Object.entries(rets).map(([k,v]) => `
+    <div class="ret-cell"><div class="rk">${k}</div>
+    <div class="rv ${v==null?'':pctClass(v)}">${v==null?"—":fmtPct(v)}</div></div>`).join("")}</div>
+  <div class="hint" style="margin-top:10px;margin-bottom:0">Period returns are based on the reconstructed value of current holdings using historical market prices.</div>`;
+}
+
+/* ---- Holdings ---- */
+function priceCellHTML(h) {
+  const q = quote(h.t), live = isLive(h), p = priceOf(h);
+  let sub = `<span class="badge b-man">fallback</span>`;
+  if (live && q.prev > 0) {
+    const d = q.price / q.prev - 1;
+    sub = `<span class="sub-num ${pctClass(d)}">${d >= 0 ? "▲" : "▼"} ${fmtPct(d)} today</span>`;
+  } else if (live) {
+    sub = `<span class="badge b-live">live</span>`;
+  }
+  return `${fmtPrice(p)}<br>${sub}`;
+}
+function holdingsView() {
+  const segs = classBreakdown();
+  const mv = marketValue();
+  const c = currentClient();
+  const mine = c ? clientStats(c).frac : 1;
+  const baseLabel = c ? esc(c.name) + "'s " + (mine*100).toFixed(1) + "% share" : "the whole fund";
+  const rows = [...db.holdings].sort((a,b) => b.sh*priceOf(b) - a.sh*priceOf(a));
+  return `
+  <div class="page-head"><h2 class="serif">Holdings &amp; allocation</h2><span class="asof" id="px-status">${statusHTML()}</span></div>
+  <div class="panel">
+    <div class="split">
+      <div>
+        <h3>Asset allocation</h3><div class="hint">By market value, including cash</div>
+        ${donutHTML(segs)}
+        <ul class="legend">${segs.map((s,i) => `
+          <li><span class="sw" style="background:${DONUT_COLORS[i%DONUT_COLORS.length]}"></span>${esc(s.label)}<span class="lw">${s.value.toFixed(1)}%</span></li>`).join("")}
+        </ul>
+      </div>
+      <div>
+        <h3>Portfolio holdings</h3><div class="hint">Values shown for ${baseLabel}</div>
+        <table><thead><tr><th>Position</th><th>Class</th><th class="num">Price</th><th class="num">Weight</th><th class="num">Value</th></tr></thead>
+        <tbody>
+        ${rows.map(h => {
+          const val = h.sh * priceOf(h);
+          return `<tr>
+            <td>${esc(h.name || h.t)}<br><span class="tkr">${esc(h.t.toUpperCase())}</span></td>
+            <td><span class="pill">${esc(h.cls)}</span></td>
+            <td class="num">${priceCellHTML(h)}</td>
+            <td class="num">${mv ? (val/mv*100).toFixed(1) : "0.0"}%</td>
+            <td class="num">${fmtMoney(val * mine)}</td>
+          </tr>`;
+        }).join("")}
+        <tr>
+          <td>Cash &amp; equivalents<br><span class="tkr">USD</span></td>
+          <td><span class="pill">Cash</span></td><td class="num">—</td>
+          <td class="num">${mv ? ((db.cash||0)/mv*100).toFixed(1) : "0.0"}%</td>
+          <td class="num">${fmtMoney((db.cash||0) * mine)}</td>
+        </tr>
+        </tbody></table>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ---- Admin ---- */
+function adminView() {
+  const mv = marketValue(), tp = totalPrincipal();
+  return `
+  <div class="page-head"><h2 class="serif">Fund administration</h2><span class="asof" id="px-status">${statusHTML()}</span></div>
+
+  <div class="panel">
+    <h3>Portfolio positions</h3>
+    <div class="hint">Enter a ticker and number of shares — prices load live (last-known price is used if quotes are temporarily unavailable).
+      Positions total <b>${fmtMoney(positionsValue())}</b> + cash <b>${fmtMoney(db.cash||0)}</b> = <b>${fmtMoney(mv)}</b></div>
+    <table>
+      <thead><tr><th style="width:90px">Ticker</th><th>Name</th><th style="width:150px">Class</th>
+      <th class="num" style="width:100px">Shares</th>
+      <th class="num" style="width:120px">Price</th><th class="num" style="width:130px">Market value</th><th style="width:36px"></th></tr></thead>
+      <tbody>
+      ${db.holdings.map((h,i) => {
+        return `<tr>
+          <td><input class="tbl-input" value="${esc(h.t)}" onchange="app.editH(${i},'t',this.value)" placeholder="AAPL"></td>
+          <td><input class="tbl-input" value="${esc(h.name||"")}" onchange="app.editH(${i},'name',this.value)" placeholder="(auto from quote)"></td>
+          <td><select class="tbl-input" onchange="app.editH(${i},'cls',this.value)">
+            ${ASSET_CLASSES.map(c => `<option ${c===h.cls?"selected":""}>${c}</option>`).join("")}</select></td>
+          <td><input class="tbl-input num" type="number" step="1" min="0" value="${h.sh}" onchange="app.editH(${i},'sh',this.value)"></td>
+          <td class="num">${priceCellHTML(h)}</td>
+          <td class="num">${fmtMoney(h.sh * priceOf(h))}</td>
+          <td><button class="del-btn" title="Remove" onclick="app.delH(${i})">✕</button></td>
+        </tr>`;
+      }).join("")}
+      </tbody>
+    </table>
+    <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+      <button class="btn btn-ghost btn-sm" onclick="app.addH()">+ Add position</button>
+      <div class="field" style="margin:0"><label>CASH BALANCE (USD)</label>
+        <input id="cash-in" type="number" step="1000" value="${db.cash||0}" onchange="app.setCash(this.value)" style="max-width:160px"></div>
+      <button class="btn btn-primary btn-sm" style="width:auto" onclick="app.refresh()" ${state.refreshing?"disabled":""}>${state.refreshing?"Refreshing…":"↻ Refresh live prices"}</button>
+    </div>
+    <div class="flash" id="h-flash"></div>
+  </div>
+
+  <div class="panel">
+    <h3>Investors</h3>
+    <div class="hint">Ownership is pro-rata to principal invested. Fund: <b>${fmtMoney(mv)}</b> market value vs <b>${fmtMoney(tp)}</b> principal
+      (<b class="${pctClass(mv-tp)}">${tp ? fmtPct((mv-tp)/tp) : "—"}</b>)</div>
+    <table><thead><tr><th>Name</th><th class="num">Principal</th><th class="num">Ownership</th><th class="num">Current value</th><th class="num">Gain</th><th></th></tr></thead>
+    <tbody>${db.clients.map(c => { const st = clientStats(c); return `
+      <tr><td>${esc(c.name)}<br><span class="tkr">${esc(c.email)}</span></td>
+      <td class="num">${fmtMoney(st.principal)}</td>
+      <td class="num">${(st.frac*100).toFixed(1)}%</td>
+      <td class="num">${fmtMoney(st.value)}</td>
+      <td class="num ${pctClass(st.gain)}">${fmtPct(st.gainPct)}</td>
+      <td style="text-align:right;white-space:nowrap">
+        <button class="link-btn" onclick="app.setViewer('${c.id}')">View portal</button>
+        <button class="del-btn" title="Remove investor" onclick="app.delClient(${c.id})">✕</button>
+      </td></tr>`; }).join("")}
+    </tbody></table>
+    <div class="hint" style="margin-top:8px;margin-bottom:0">Share a direct link with an investor: add <b>?investor=their-email</b> to the site URL.</div>
+
+    <h3 style="margin-top:22px">Add investor / contribution</h3>
+    <div class="hint">Use an existing email to record an additional contribution.</div>
+    <div class="inline-form">
+      <div class="field"><label>NAME</label><input id="inv-name" placeholder="Full name"></div>
+      <div class="field"><label>EMAIL</label><input id="inv-email" placeholder="email@example.com"></div>
+      <div class="field"><label>AMOUNT (USD)</label><input id="inv-amt" type="number" step="1000" placeholder="250000"></div>
+      <div class="field"><label>MONTH (YYYY-MM)</label><input id="inv-ym" value="${nowYm()}"></div>
+      <button class="btn btn-gold" style="width:auto" onclick="app.addInvestor()">Add</button>
+    </div>
+    <div class="flash" id="inv-flash"></div>
+  </div>
+
+  <div class="panel">
+    <h3>Settings</h3>
+    <div class="hint">The fund name appears in the header, browser tab, and footer.</div>
+    <div class="inline-form" style="margin-bottom:14px">
+      <div class="field" style="max-width:300px"><label>FUND NAME</label>
+        <input id="fund-name" value="${esc(db.fund.name)}" onchange="app.editFund('name',this.value)"></div>
+      <div class="field" style="max-width:360px"><label>LEGAL NAME / FOOTER LABEL</label>
+        <input id="fund-label" value="${esc(db.fund.label)}" onchange="app.editFund('label',this.value)"></div>
+    </div>
+    <div class="hint">Live quotes come from this site's own API when deployed (most reliable) with public Yahoo routes as backup.
+      Optionally add a free <b>finnhub.io</b> API key as an extra source.</div>
+    <div class="inline-form">
+      <div class="field" style="max-width:340px"><label>FINNHUB API KEY (OPTIONAL)</label>
+        <input id="api-key" value="${esc(db.key||"")}" placeholder="paste key here"></div>
+      <button class="btn btn-primary btn-sm" style="width:auto" onclick="app.setKey()">Save key</button>
+      <button class="btn btn-ghost btn-sm" onclick="app.reset()">Reset to sample data</button>
+    </div>
+    <div class="flash" id="set-flash"></div>
+  </div>`;
+}
+
+/* ================= Actions ================= */
+window.app = {
+  tab(t) { state.tab = t; render(); },
+  setViewer(v) {
+    state.viewer = v;
+    try {
+      const c = currentClient();
+      const url = new URL(location.href);
+      if (c) url.searchParams.set("investor", c.email); else url.searchParams.delete("investor");
+      history.replaceState(null, "", url);
+    } catch (e) {}
+    if (state.tab === "admin" && currentClient()) state.tab = "overview";
+    render();
+  },
+  refresh() { refreshAll(); },
+
+  editFund(k, v) {
+    v = v.trim();
+    db.fund[k] = v || DEFAULTS().fund[k];
+    storeAndSync(); render();
+    flash("set-flash", "Fund details updated.");
+  },
+  editH(i, key, val) {
+    const h = db.holdings[i]; if (!h) return;
+    if (key === "sh" || key === "fb") {
+      const n = parseFloat(val);
+      if (isNaN(n) || n < 0) { render(); return; }
+      h[key] = n;
+    } else if (key === "t") {
+      h.t = val.trim().toUpperCase();
+      if (h.t) refreshOne(h.t);
+    } else h[key] = val;
+    storeAndSync(); render();
+  },
+  delH(i) { db.holdings.splice(i,1); storeAndSync(); render(); },
+  addH() { db.holdings.push({ t:"", name:"", cls:"US Equity", sh:0, fb:0 }); storeAndSync(); render(); },
+  setCash(v) { const n = parseFloat(v); db.cash = isNaN(n) || n < 0 ? 0 : n; storeAndSync(); render(); },
+
+  addInvestor() {
+    const name = $("inv-name").value.trim();
+    const email = $("inv-email").value.trim().toLowerCase();
+    const amt = parseFloat($("inv-amt").value);
+    const ym = $("inv-ym").value.trim();
+    if (!validYm(ym)) { flash("inv-flash", "Enter month as YYYY-MM.", true); return; }
+    if (!(amt > 0)) { flash("inv-flash", "Enter a valid amount.", true); return; }
+    let c = db.clients.find(x => x.email === email);
+    if (c) c.contributions.push({ ym, amount: amt });
+    else {
+      if (!name || !email.includes("@")) { flash("inv-flash", "Enter a name and valid email.", true); return; }
+      c = { id: Date.now(), name, email, contributions: [{ ym, amount: amt }] };
+      db.clients.push(c);
+    }
+    storeAndSync(); render();
+    flash("inv-flash", fmtMoney(amt) + " contribution recorded for " + c.name + ".");
+  },
+  delClient(id) { db.clients = db.clients.filter(c => c.id !== id); if (String(state.viewer) === String(id)) state.viewer = "fund"; storeAndSync(); render(); },
+  setKey() {
+    db.key = $("api-key").value.trim();
+    storeAndSync(); flash("set-flash", db.key ? "API key saved — refreshing quotes." : "API key cleared.");
+    if (db.key) refreshAll();
+  },
+  reset() {
+    try { localStorage.removeItem(STORE_KEY); } catch (e) {}
+    db = DEFAULTS();
+    storeAndSync(); render(); refreshAll();
+  }
+};
+
+function flash(id, msg, isErr) {
+  const el = $(id); if (!el) return;
+  el.textContent = msg;
+  el.className = "flash" + (isErr ? " warn" : "");
+}
+
+function afterRender() {
+  if (state.tab === "overview") {
+    const c = currentClient();
+    if (c) wireAreaChart("cchart", clientSeries(c));
+    else wireAreaChart("fchart", fundSeries());
+  }
+}
+
+/* ================= Boot ================= */
+loadStore();
+try {
+  if (typeof location !== "undefined" && location.search) {
+    const inv = new URLSearchParams(location.search).get("investor");
+    if (inv) {
+      const c = db.clients.find(x => x.email.toLowerCase() === inv.trim().toLowerCase());
+      if (c) state.viewer = String(c.id);
+    }
+  }
+} catch (e) {}
+render();
+(async () => {
+  const remote = await cloudLoad();
+  if (remote && Array.isArray(remote.holdings) && Array.isArray(remote.clients)) {
+    if ((remote.at || 0) >= (db.at || 0)) { db = Object.assign(DEFAULTS(), remote); store(); render(); }
+    else cloudSave(); // local copy is newer — push it up
+  } else if (cloudMode === "on") {
+    db.at = db.at || Date.now();
+    cloudSave(); // first run: seed cloud with local/sample data
+  }
+  updateBanner();
+  if (typeof fetch === "function") refreshAll();
+})();
+setInterval(() => { if (typeof document.visibilityState !== "string" || document.visibilityState === "visible") refreshAll(); }, 5 * 60 * 1000);
+setInterval(pollSync, 60 * 1000);
+</script>
+</body>
+</html>
