@@ -50,6 +50,7 @@ export default async function handler(req, res) {
         at: state.at || 0,
         fund: state.fund,
         cash: state.cash,
+        ytd: state.ytd ?? null, // manager-reported YTD figure
         holdings: state.holdings,
         quotes: state.quotes,
         clients: [me],

@@ -52,4 +52,5 @@ Quotes come from the site's `/api/quote` endpoint (server-side Yahoo Finance, de
 - Passwords are hashed (scrypt) and stored separately from portfolio data; sessions are signed, httpOnly, secure cookies. Investors' API responses never include other investors' names or amounts.
 - Optional: add a `SESSION_SECRET` env var (any long random string). Without it, sessions are keyed off the Blob token and everyone is signed out if you recreate the store.
 - Suitable for a small fund sharing statements with clients. For production-grade needs (2FA, audit logs, rate limiting, password self-reset, compliance review), treat this as the starting point, not the finish line.
-- Remaining limits: last write wins if two admins edit simultaneously; quotes are delayed and unofficial; performance is pro-rata to principal (every investor shows the fund's overall return regardless of entry timing — unitized NAV accounting can be added if that matters).
+- Ownership is pro-rata to principal invested: each investor's current value is their share of the fund's market value, so all investors show the fund's overall gain percentage regardless of entry timing. The fund's YTD figure is entered manually in Settings (e.g. from your IBKR statement) — never computed.
+- Remaining limits: last write wins if two admins edit simultaneously; quotes are delayed and unofficial.

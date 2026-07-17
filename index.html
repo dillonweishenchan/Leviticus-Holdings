@@ -193,6 +193,7 @@ const DEFAULTS = () => ({
   fund: { name: "Harbor Point Capital", label: "Harbor Point Partners Fund, LP" },
   cash: 400000,
   key: "", // optional Finnhub API key (extra quote source)
+  ytd: null, // YTD return in %, entered by the manager in Settings (null = show —)
   holdings: [
     { t:"SPY",   name:"SPDR S&P 500 ETF",         cls:"US Equity",            sh:3000, fb:560 },
     { t:"AAPL",  name:"Apple Inc.",                cls:"US Equity",            sh:4000, fb:210 },
@@ -432,7 +433,7 @@ function positionsValue() { return db.holdings.reduce((s,h) => s + h.sh * priceO
 function marketValue() { return positionsValue() + (db.cash || 0); }
 function principalOf(c, uptoYm) { return c.contributions.reduce((s,k) => s + ((!uptoYm || k.ym <= uptoYm) ? k.amount : 0), 0); }
 function totalPrincipal(uptoYm) {
-  // Investor sessions get an aggregated principal series instead of other
+  // Investor sessions get an aggregated series instead of other
   // investors' records, so their ownership % still computes correctly.
   if (db.tpSeries && db.tpSeries.length) {
     let best = 0;
@@ -441,7 +442,10 @@ function totalPrincipal(uptoYm) {
   }
   return db.clients.reduce((s,c) => s + principalOf(c, uptoYm), 0);
 }
+/* Ownership is pro-rata to principal invested. */
 function fracOf(c, uptoYm) { const tp = totalPrincipal(uptoYm); return tp ? principalOf(c, uptoYm) / tp : 0; }
+/* The fund's YTD figure is entered manually in Settings (e.g. from IBKR) — never computed. */
+function manualYtd() { return (db.ytd === null || db.ytd === undefined || db.ytd === "") ? null : db.ytd / 100; }
 
 function clientStats(c) {
   const mv = marketValue();
@@ -479,21 +483,6 @@ function clientSeries(c) {
     .map(p => ({ ym: p.ym, label: p.label, value: fracOf(c, p.ym) * p.value, principal: principalOf(c, p.ym) }))
     .filter(p => p.principal > 0);
 }
-function periodReturns(series) {
-  const out = {};
-  const n = series.length;
-  const L = n ? series[n-1].value : 0;
-  const back = (k) => (n > k ? L / series[n-1-k].value - 1 : null);
-  out["1 Mo"] = back(1); out["3 Mo"] = back(3); out["1 Yr"] = back(12);
-  let ytd = null;
-  if (n) {
-    const yr = series[n-1].ym.slice(0,4);
-    const prev = series.filter(p => p.ym < yr + "-01");
-    if (prev.length) ytd = L / prev[prev.length-1].value - 1;
-  }
-  out["YTD"] = ytd;
-  return out;
-}
 function classBreakdown() {
   const m = {};
   for (const h of db.holdings) m[h.cls] = (m[h.cls] || 0) + h.sh * priceOf(h);
@@ -501,9 +490,22 @@ function classBreakdown() {
   const mv = marketValue() || 1;
   return ASSET_CLASSES.filter(c => m[c]).map(c => ({ label: c, value: m[c] / mv * 100, mv: m[c] }));
 }
+function holdingBreakdown() {
+  const mv = marketValue() || 1;
+  const segs = db.holdings
+    .map(h => ({ label: (h.t || h.name || "?").toUpperCase(), value: h.sh * priceOf(h) / mv * 100 }))
+    .filter(s => s.value > 0)
+    .sort((a,b) => b.value - a.value);
+  const MAX = 8;
+  const top = segs.slice(0, MAX);
+  const rest = segs.slice(MAX).reduce((s,x) => s + x.value, 0);
+  if (rest > 0) top.push({ label: "Other", value: rest });
+  if (db.cash > 0) top.push({ label: "Cash", value: db.cash / mv * 100 });
+  return top;
+}
 
 /* ================= SVG Charts ================= */
-const DONUT_COLORS = ["#10283f","#b08d4a","#5b7f71","#8496a8","#c2703e","#cfc6b2"];
+const DONUT_COLORS = ["#10283f","#b08d4a","#5b7f71","#8496a8","#c2703e","#4e6e8e","#9a7b5f","#6b8e23","#7a5c72","#cfc6b2"];
 const CH = { W: 920, H: 300, padL: 74, padR: 20, padT: 18, padB: 34 };
 
 function chartScales(series) {
@@ -687,14 +689,14 @@ function overviewView() {
   if (!c) {
     const gain = mv - tp, gp = tp ? gain/tp : 0;
     const series = fundSeries();
-    const rets = periodReturns(series);
+    const ytd = manualYtd();
     return `
     <div class="page-head"><h2 class="serif">Fund overview</h2><span class="asof" id="px-status">${statusHTML()}</span></div>
     <div class="cards">
       <div class="card accent"><div class="k">Fund market value</div><div class="v">${fmtMoney(mv)}</div><div class="s">${db.holdings.length} positions + cash</div></div>
       <div class="card"><div class="k">Principal invested</div><div class="v">${fmtMoney(tp)}</div><div class="s">${db.clients.length} investors</div></div>
       <div class="card"><div class="k">Total gain</div><div class="v ${pctClass(gain)}">${fmtMoney(gain)}</div><div class="s ${pctClass(gain)}">${fmtPct(gp)} vs principal</div></div>
-      <div class="card"><div class="k">YTD</div><div class="v ${rets["YTD"]==null?'':pctClass(rets["YTD"])}">${rets["YTD"]==null?"—":fmtPct(rets["YTD"])}</div><div class="s">portfolio value</div></div>
+      <div class="card"><div class="k">YTD</div><div class="v ${ytd==null?'':pctClass(ytd)}">${ytd==null?"—":fmtPct(ytd)}</div><div class="s">${ytd==null?"set in Admin → Settings":"as reported"}</div></div>
     </div>
     <div class="panel">
       <h3>Market value vs principal</h3>
@@ -702,14 +704,14 @@ function overviewView() {
       ${areaChartHTML(series, "fchart")}
     </div>
     <div class="panel">
-      <h3>Performance</h3>
-      <div class="ret-hero"><span class="big ${pctClass(gp)}">${fmtPct(gp)}</span><span class="cap">total return — market value vs principal invested</span></div>
-      ${retGridHTML(rets)}
+      <h3>Investor performance</h3>
+      <div class="hint">Each investor's position, marked to the latest prices</div>
+      <table><thead><tr><th>Investor</th><th class="num">Principal</th><th class="num">Ownership</th><th class="num">Current value</th><th class="num">Gain ($)</th><th class="num">Gain (%)</th></tr></thead>
+      <tbody>${db.clients.map(x => `<tr><td>${esc(x.name)}</td>${perfRowHTML(clientStats(x))}</tr>`).join("")}</tbody></table>
     </div>`;
   }
   const st = clientStats(c);
   const series = clientSeries(c);
-  const rets = periodReturns(series);
   return `
   <div class="page-head"><h2 class="serif">${esc(c.name)} — account overview</h2><span class="asof" id="px-status">${statusHTML()}</span></div>
   <div class="cards">
@@ -725,8 +727,9 @@ function overviewView() {
   </div>
   <div class="panel">
     <h3>Performance</h3>
-    <div class="ret-hero"><span class="big ${pctClass(st.gainPct)}">${fmtPct(st.gainPct)}</span><span class="cap">total return — account value vs principal</span></div>
-    ${retGridHTML(rets)}
+    <div class="hint">Your position, marked to the latest prices</div>
+    <table><thead><tr><th class="num">Principal</th><th class="num">Ownership</th><th class="num">Current value</th><th class="num">Gain ($)</th><th class="num">Gain (%)</th></tr></thead>
+    <tbody><tr>${perfRowHTML(st)}</tr></tbody></table>
   </div>
   <div class="panel">
     <h3>Contribution history</h3><div class="hint">Capital invested into the fund</div>
@@ -734,11 +737,13 @@ function overviewView() {
     <tbody>${c.contributions.map(k => `<tr><td>${monthLabel(k.ym)}</td><td class="num">${fmtMoney(k.amount)}</td></tr>`).join("")}</tbody></table>
   </div>`;
 }
-function retGridHTML(rets) {
-  return `<div class="ret-grid">${Object.entries(rets).map(([k,v]) => `
-    <div class="ret-cell"><div class="rk">${k}</div>
-    <div class="rv ${v==null?'':pctClass(v)}">${v==null?"—":fmtPct(v)}</div></div>`).join("")}</div>
-  <div class="hint" style="margin-top:10px;margin-bottom:0">Period returns are based on the reconstructed value of current holdings using historical market prices.</div>`;
+function perfRowHTML(st) {
+  return `
+    <td class="num">${fmtMoney(st.principal)}</td>
+    <td class="num">${(st.frac*100).toFixed(1)}%</td>
+    <td class="num">${fmtMoney(st.value)}</td>
+    <td class="num ${pctClass(st.gain)}">${fmtMoney(st.gain)}</td>
+    <td class="num ${pctClass(st.gain)}">${fmtPct(st.gainPct)}</td>`;
 }
 
 /* ---- Holdings ---- */
@@ -755,6 +760,7 @@ function priceCellHTML(h) {
 }
 function holdingsView() {
   const segs = classBreakdown();
+  const hsegs = holdingBreakdown();
   const mv = marketValue();
   const c = currentClient();
   const mine = c ? clientStats(c).frac : 1;
@@ -765,7 +771,12 @@ function holdingsView() {
   <div class="panel">
     <div class="split">
       <div>
-        <h3>Asset allocation</h3><div class="hint">By market value, including cash</div>
+        <h3>Holdings allocation</h3><div class="hint">By position, share of market value</div>
+        ${donutHTML(hsegs)}
+        <ul class="legend">${hsegs.map((s,i) => `
+          <li><span class="sw" style="background:${DONUT_COLORS[i%DONUT_COLORS.length]}"></span>${esc(s.label)}<span class="lw">${s.value.toFixed(1)}%</span></li>`).join("")}
+        </ul>
+        <h3 style="margin-top:26px">Asset allocation</h3><div class="hint">By asset class, including cash</div>
         ${donutHTML(segs)}
         <ul class="legend">${segs.map((s,i) => `
           <li><span class="sw" style="background:${DONUT_COLORS[i%DONUT_COLORS.length]}"></span>${esc(s.label)}<span class="lw">${s.value.toFixed(1)}%</span></li>`).join("")}
@@ -908,6 +919,11 @@ function adminView() {
       <div class="field" style="max-width:360px"><label>LEGAL NAME / FOOTER LABEL</label>
         <input id="fund-label" value="${esc(db.fund.label)}" onchange="app.editFund('label',this.value)"></div>
     </div>
+    <div class="hint">The YTD figure on the fund overview is whatever you enter here (e.g. from your IBKR statement) — it is never computed. Leave blank to show “—”.</div>
+    <div class="inline-form" style="margin-bottom:14px">
+      <div class="field" style="max-width:200px"><label>YTD RETURN (%)</label>
+        <input id="fund-ytd" type="number" step="0.1" value="${db.ytd ?? ""}" placeholder="e.g. 6.8 or -2.3" onchange="app.setYtd(this.value)"></div>
+    </div>
     <div class="hint">Live quotes come from this site's own API when deployed (most reliable) with public Yahoo routes as backup.
       Optionally add a free <b>finnhub.io</b> API key as an extra source.</div>
     <div class="inline-form">
@@ -1049,6 +1065,20 @@ window.app = {
     const c = db.clients.find(x => String(x.id) === String(id)); if (!c) return;
     c.contributions.splice(j, 1);
     storeAndSync(); render();
+  },
+  setYtd(v) {
+    v = String(v).trim();
+    if (v === "") {
+      db.ytd = null;
+      storeAndSync(); render();
+      flash("set-flash", "YTD cleared — shown as “—” until you set it.");
+      return;
+    }
+    const n = parseFloat(v);
+    if (isNaN(n) || n < -100 || n > 1000) { flash("set-flash", "Enter a percentage like 6.8 or -2.3.", true); render(); return; }
+    db.ytd = n;
+    storeAndSync(); render();
+    flash("set-flash", "YTD set to " + fmtPct(n / 100) + " — investors see this figure.");
   },
   setKey() {
     db.key = $("api-key").value.trim();
