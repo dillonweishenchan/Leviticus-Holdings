@@ -286,6 +286,7 @@ async function pollSync() {
   const remote = await cloudLoad();
   if (remote && remote.at && remote.at > (db.at || 0)) {
     db = Object.assign(DEFAULTS(), remote);
+    ensureUnits(db);
     store(); render();
   }
 }
@@ -442,14 +443,20 @@ function totalPrincipal(uptoYm) {
   }
   return db.clients.reduce((s,c) => s + principalOf(c, uptoYm), 0);
 }
-/* Each investor's CURRENT VALUE is a real number: the admin sets it once from
-   their records (defaults to principal until set), and from then on it moves
-   with live prices — every investor's value scales with the fund and they
-   always sum exactly to market value. Gain = current value − principal, so
-   gain % genuinely differs per investor. */
-function stakeOf(c) { return (typeof c.stake === "number" && c.stake > 0) ? c.stake : principalOf(c); }
-function totalStakes() { return db.clients.reduce((s,c) => s + stakeOf(c), 0); }
-function fracOf(c, uptoYm) { const ts = totalStakes(); return ts ? stakeOf(c) / ts : 0; }
+/* NAV/UNIT system: each contribution buys units at its entry price
+   (units = amount ÷ entry $/unit). Unit price (NAV) = market value ÷ total
+   units, so it moves with live prices. An investor's current value =
+   their units × unit price — it is derived, never edited directly.
+   Entries default to $1.00/unit until their entry price is set. */
+function ensureUnits(d) {
+  for (const c of d.clients || []) for (const k of c.contributions || []) if (!(k.units > 0)) k.units = k.amount;
+}
+function unitsOf(c, uptoYm) {
+  return c.contributions.reduce((s,k) => s + ((!uptoYm || k.ym <= uptoYm) ? (k.units > 0 ? k.units : k.amount) : 0), 0);
+}
+function totalUnits(uptoYm) { return db.clients.reduce((s,c) => s + unitsOf(c, uptoYm), 0); }
+function unitPrice() { const tu = totalUnits(); return tu > 0 ? marketValue() / tu : 1; }
+function fracOf(c, uptoYm) { const tu = totalUnits(uptoYm); return tu ? unitsOf(c, uptoYm) / tu : 0; }
 /* The fund's YTD figure is entered manually in Settings (e.g. from IBKR) — never computed. */
 function manualYtd() { return (db.ytd === null || db.ytd === undefined || db.ytd === "") ? null : db.ytd / 100; }
 
@@ -703,7 +710,7 @@ function overviewView() {
       <div class="card accent"><div class="k">Fund market value</div><div class="v">${fmtMoney(mv)}</div><div class="s">${db.holdings.length} positions + cash</div></div>
       <div class="card"><div class="k">Principal invested</div><div class="v">${fmtMoney(tp)}</div><div class="s">${db.clients.length} investors</div></div>
       <div class="card"><div class="k">Total gain</div><div class="v ${pctClass(gain)}">${fmtMoney(gain)}</div><div class="s ${pctClass(gain)}">${fmtPct(gp)} vs principal</div></div>
-      <div class="card"><div class="k">YTD</div><div class="v ${ytd==null?'':pctClass(ytd)}">${ytd==null?"—":fmtPct(ytd)}</div><div class="s">${ytd==null?"set in Admin → Settings":"as reported"}</div></div>
+      <div class="card"><div class="k">YTD</div><div class="v ${ytd==null?'':pctClass(ytd)}">${ytd==null?"—":fmtPct(ytd)}</div><div class="s">${ytd==null?"set in Admin → Settings":"as of " + new Date().toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</div></div>
     </div>
     <div class="panel">
       <h3>Market value vs principal</h3>
@@ -738,11 +745,6 @@ function overviewView() {
     <table><thead><tr><th>Investor</th><th class="num">Principal</th><th class="num">Ownership</th><th class="num">Current value</th><th class="num">Gain ($)</th><th class="num">Gain (%)</th></tr></thead>
     <tbody>${db.clients.map(x => `<tr><td>${esc(x.name)}${String(x.id)===String(c.id) ? ' <span class="pill" style="margin-left:6px">viewing</span>' : ""}</td>${perfRowHTML(clientStats(x))}</tr>`).join("")}</tbody></table>
   </div>`;
-}
-function stakeDriftHTML(mv) {
-  const ts = totalStakes();
-  if (!ts || !mv || Math.abs(ts - mv) / mv < 0.005) return "";
-  return `<br><span class="warn">Entered values total ${fmtMoney(ts)} but the live market value is ${fmtMoney(mv)} — displayed values are scaled proportionally so they sum to ${fmtMoney(mv)}.</span>`;
 }
 function perfRowHTML(st) {
   return `
@@ -855,10 +857,9 @@ function adminView() {
 
   <div class="panel">
     <h3>Investors</h3>
-    <div class="hint"><b>Type each investor's Current value</b> (from your records) — gain is derived from it vs their principal.
-      Values then move with live prices, scaled so they always total the fund's market value.
-      Fund: <b>${fmtMoney(mv)}</b> market value vs <b>${fmtMoney(tp)}</b> principal
-      (<b class="${pctClass(mv-tp)}">${tp ? fmtPct((mv-tp)/tp) : "—"}</b>)${stakeDriftHTML(mv)}</div>
+    <div class="hint">Ownership is by <b>units</b> (NAV): each contribution buys units at its entry price, so gains reflect when each investor came in.
+      Current unit price: <b>${fmtPrice(unitPrice())}</b> · Fund: <b>${fmtMoney(mv)}</b> market value vs <b>${fmtMoney(tp)}</b> principal
+      (<b class="${pctClass(mv-tp)}">${tp ? fmtPct((mv-tp)/tp) : "—"}</b>)</div>
     <table><thead><tr><th>Name / email</th><th class="num">Principal</th><th class="num">Ownership</th><th class="num">Current value</th><th class="num">Gain</th><th></th></tr></thead>
     <tbody>${db.clients.map(c => {
       const st = clientStats(c);
@@ -870,9 +871,8 @@ function adminView() {
       </td>
       <td class="num">${fmtMoney(st.principal)}</td>
       <td class="num">${(st.frac*100).toFixed(1)}%</td>
-      <td style="max-width:130px"><input class="tbl-input tbl-edit num" type="number" step="1" min="0" value="${Math.round(st.value)}"
-        onchange="app.editStake(${c.id}, this.value)" title="Type this investor's current value from your records"></td>
-      <td class="num ${pctClass(st.gain)}">${fmtMoney(st.gain)}<span class="sub-num ${pctClass(st.gain)}">${fmtPct(st.gainPct)}</span></td>
+      <td class="num">${fmtMoney(st.value)}</td>
+      <td class="num ${pctClass(st.gain)}">${fmtPct(st.gainPct)}</td>
       <td style="text-align:right;white-space:nowrap">
         <button class="link-btn" onclick="app.toggleContrib(${c.id})">${open ? "Close" : "Edit contributions"}</button>
         <button class="link-btn" style="margin-left:10px" onclick="app.setViewer('${c.id}')">View portal</button>
@@ -888,19 +888,24 @@ function adminView() {
             <input value="${esc(c.email)}" onchange="app.editClient(${c.id},'email',this.value)"></div>
         </div>
         <b style="font-size:13px;color:var(--navy)">Contributions — ${esc(c.name)}</b>
-        <table style="margin-top:8px;max-width:540px">
-          <thead><tr><th style="width:170px">Month (YYYY-MM)</th><th class="num">Amount (USD)</th><th style="width:36px"></th></tr></thead>
+        <table style="margin-top:8px;max-width:720px">
+          <thead><tr><th style="width:140px">Month (YYYY-MM)</th><th class="num">Amount (USD)</th><th class="num" style="width:120px">Entry $/unit</th><th class="num" style="width:130px">Units</th><th style="width:36px"></th></tr></thead>
           <tbody>
-          ${c.contributions.map((k,j) => `
+          ${c.contributions.map((k,j) => { const u = k.units > 0 ? k.units : k.amount; return `
             <tr>
               <td><input class="tbl-input" value="${esc(k.ym)}" onchange="app.editContrib(${c.id},${j},'ym',this.value)"></td>
               <td><input class="tbl-input num" type="number" step="1000" min="0" value="${k.amount}" onchange="app.editContrib(${c.id},${j},'amount',this.value)"></td>
+              <td><input class="tbl-input num" type="number" step="0.0001" min="0" value="${(k.amount/u).toFixed(4)}" onchange="app.editContrib(${c.id},${j},'eprice',this.value)"></td>
+              <td><input class="tbl-input num" type="number" step="0.01" min="0" value="${u.toFixed(2)}" onchange="app.editContrib(${c.id},${j},'units',this.value)"></td>
               <td><button class="del-btn" title="Remove contribution" onclick="app.delContrib(${c.id},${j})">✕</button></td>
-            </tr>`).join("")}
-          ${c.contributions.length ? "" : `<tr><td colspan="3" class="muted" style="font-size:13px">No contributions — add one with the form below.</td></tr>`}
+            </tr>`; }).join("")}
+          ${c.contributions.length ? "" : `<tr><td colspan="5" class="muted" style="font-size:13px">No contributions — add one with the form below.</td></tr>`}
           </tbody>
         </table>
-        <div class="hint" style="margin:8px 0 0">Contributions set the investor's <b>principal</b> (cost basis). Their <b>Current value</b> is edited directly in the table above. To add another contribution, use the form below with this investor's email.</div>
+        <div class="hint" style="margin:8px 0 0"><b>${esc(c.name)} holds ${unitsOf(c).toLocaleString(undefined,{maximumFractionDigits:2})} units = ${(fracOf(c)*100).toFixed(1)}% of the fund.</b>
+          Current value = units × unit price (now ${fmtPrice(unitPrice())}). Backfilled entries default to $1.00/unit —
+          set each entry's real <b>Entry $/unit</b> (the fund's unit price when that money came in) and units, value and gain update automatically.</div>
+        <div class="hint" style="margin:8px 0 0">To add another contribution, use the form below with this investor's email.</div>
       </td></tr>` : ""}`;
     }).join("")}
     </tbody></table>
@@ -908,14 +913,16 @@ function adminView() {
     <div class="hint" style="margin-top:4px;margin-bottom:0">Names and emails are editable in place — click, type, and press Tab or Enter to save. <b>Edit contributions</b> opens details. All investors sign in with the shared <b>investor</b> login (set INVESTOR_PASSWORD in Vercel); emails here are just labels for you.</div>
 
     <h3 style="margin-top:22px">Add investor / contribution</h3>
-    <div class="hint">Use an existing email to record an additional contribution.</div>
+    <div class="hint">Use an existing email to record an additional contribution. Entry price defaults to the current unit price (right for new money); override it for backdated contributions.</div>
     <div class="inline-form">
       <div class="field"><label>NAME</label><input id="inv-name" placeholder="Full name"></div>
       <div class="field"><label>EMAIL</label><input id="inv-email" placeholder="email@example.com"></div>
       <div class="field"><label>AMOUNT (USD)</label><input id="inv-amt" type="number" step="1000" placeholder="250000"></div>
       <div class="field"><label>MONTH (YYYY-MM)</label><input id="inv-ym" value="${nowYm()}"></div>
+      <div class="field"><label>ENTRY $/UNIT</label><input id="inv-price" type="number" step="0.0001" value="${unitPrice().toFixed(4)}"></div>
       <button class="btn btn-gold" style="width:auto" onclick="app.addInvestor()">Add</button>
     </div>
+    <div class="hint" style="margin-top:6px">Recording a contribution adds that amount to the fund's cash balance (new money enters as cash). Deploy it into positions afterwards and lower the cash balance to match.</div>
     <div class="flash" id="inv-flash"></div>
   </div>
 
@@ -1006,29 +1013,26 @@ window.app = {
     const email = $("inv-email").value.trim().toLowerCase();
     const amt = parseFloat($("inv-amt").value);
     const ym = $("inv-ym").value.trim();
+    let eprice = parseFloat($("inv-price") ? $("inv-price").value : "");
+    if (!(eprice > 0)) eprice = unitPrice();
     if (!validYm(ym)) { flash("inv-flash", "Enter month as YYYY-MM.", true); return; }
     if (!(amt > 0)) { flash("inv-flash", "Enter a valid amount.", true); return; }
+    const units = amt / eprice;
     let c = db.clients.find(x => x.email === email);
     let isNew = false;
-    if (c) {
-      c.stake = stakeOf(c) + amt; // new money adds to their current value
-      c.contributions.push({ ym, amount: amt });
-    } else {
+    if (c) c.contributions.push({ ym, amount: amt, units });
+    else {
       if (!name || !email.includes("@")) { flash("inv-flash", "Enter a name and valid email.", true); return; }
-      c = { id: Date.now(), name, email, stake: amt, contributions: [{ ym, amount: amt }] };
+      c = { id: Date.now(), name, email, contributions: [{ ym, amount: amt, units }] };
       db.clients.push(c);
       isNew = true;
     }
+    // A contribution is cash into the fund: increasing cash by the same amount
+    // keeps the unit price (NAV) continuous, so new money starts at 0% gain.
+    // (Deploy it into positions later and reduce cash accordingly.)
+    db.cash = (db.cash || 0) + amt;
     storeAndSync(); render();
-    flash("inv-flash", fmtMoney(amt) + " contribution recorded for " + c.name + " (current value +" + fmtMoney(amt) + ").");
-  },
-  editStake(id, val) {
-    const c = db.clients.find(x => String(x.id) === String(id)); if (!c) return;
-    const n = parseFloat(val);
-    if (isNaN(n) || n < 0) { flash("inv-edit-flash", "Enter a valid current value.", true); render(); return; }
-    c.stake = n;
-    storeAndSync(); render();
-    flash("inv-edit-flash", c.name + "'s current value set to " + fmtMoney(n) + " — it now moves with live prices.");
+    flash("inv-flash", fmtMoney(amt) + " recorded for " + c.name + " at " + fmtPrice(eprice) + "/unit (" + units.toLocaleString(undefined,{maximumFractionDigits:2}) + " units); fund cash +" + fmtMoney(amt) + ".");
   },
   delClient(id) { db.clients = db.clients.filter(c => c.id !== id); if (String(state.viewer) === String(id)) state.viewer = "fund"; storeAndSync(); render(); },
   toggleContrib(id) { state.editInv = String(state.editInv) === String(id) ? null : id; render(); },
@@ -1050,14 +1054,26 @@ window.app = {
   editContrib(id, j, key, val) {
     const c = db.clients.find(x => String(x.id) === String(id));
     if (!c || !c.contributions[j]) return;
+    const k = c.contributions[j];
     if (key === "ym") {
       val = String(val).trim();
       if (!validYm(val)) { flash("inv-edit-flash", "Enter the month as YYYY-MM (e.g. 2026-07).", true); render(); return; }
-      c.contributions[j].ym = val;
-    } else {
+      k.ym = val;
+    } else if (key === "amount") {
       const n = parseFloat(val);
       if (!(n > 0)) { flash("inv-edit-flash", "Enter an amount above zero.", true); render(); return; }
-      c.contributions[j].amount = n;
+      const price = k.units > 0 ? k.amount / k.units : 1; // keep the entry price fixed
+      k.amount = n;
+      k.units = n / price;
+    } else if (key === "eprice") {
+      const n = parseFloat(val);
+      if (!(n > 0)) { flash("inv-edit-flash", "Entry price must be above zero.", true); render(); return; }
+      k.units = k.amount / n;
+      flash("inv-edit-flash", "Entry price set — " + c.name + "'s value and gain now reflect it.");
+    } else if (key === "units") {
+      const n = parseFloat(val);
+      if (!(n > 0)) { flash("inv-edit-flash", "Units must be above zero.", true); render(); return; }
+      k.units = n;
     }
     storeAndSync(); render();
   },
@@ -1118,7 +1134,7 @@ async function enterApp(sess) {
   state.viewer = "fund"; state.tab = "overview";
   const remote = await cloudLoad();
   if (remote && Array.isArray(remote.holdings)) {
-    db = Object.assign(DEFAULTS(), remote); store();
+    db = Object.assign(DEFAULTS(), remote); ensureUnits(db); store();
   } else if (auth.role === "admin") {
     db.at = db.at || Date.now();
     cloudSave(); // first run: seed the cloud with local/sample data
@@ -1127,6 +1143,7 @@ async function enterApp(sess) {
   refreshAll();
 }
 loadStore();
+ensureUnits(db);
 render(); // loading screen while the session is checked
 (async () => {
   if (typeof fetch !== "function") { auth.mode = "local"; render(); return; }
