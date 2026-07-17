@@ -442,10 +442,14 @@ function totalPrincipal(uptoYm) {
   }
   return db.clients.reduce((s,c) => s + principalOf(c, uptoYm), 0);
 }
-/* Ownership is pro-rata to principal invested — contribution dates are NOT
-   used. value = share of principal × market value; gain % = (value − principal)
-   ÷ principal. Note: this makes every investor's gain % equal the fund's. */
-function fracOf(c, uptoYm) { const tp = totalPrincipal(uptoYm); return tp ? principalOf(c, uptoYm) / tp : 0; }
+/* Each investor's CURRENT VALUE is a real number: the admin sets it once from
+   their records (defaults to principal until set), and from then on it moves
+   with live prices — every investor's value scales with the fund and they
+   always sum exactly to market value. Gain = current value − principal, so
+   gain % genuinely differs per investor. */
+function stakeOf(c) { return (typeof c.stake === "number" && c.stake > 0) ? c.stake : principalOf(c); }
+function totalStakes() { return db.clients.reduce((s,c) => s + stakeOf(c), 0); }
+function fracOf(c, uptoYm) { const ts = totalStakes(); return ts ? stakeOf(c) / ts : 0; }
 /* The fund's YTD figure is entered manually in Settings (e.g. from IBKR) — never computed. */
 function manualYtd() { return (db.ytd === null || db.ytd === undefined || db.ytd === "") ? null : db.ytd / 100; }
 
@@ -735,6 +739,11 @@ function overviewView() {
     <tbody>${db.clients.map(x => `<tr><td>${esc(x.name)}${String(x.id)===String(c.id) ? ' <span class="pill" style="margin-left:6px">viewing</span>' : ""}</td>${perfRowHTML(clientStats(x))}</tr>`).join("")}</tbody></table>
   </div>`;
 }
+function stakeDriftHTML(mv) {
+  const ts = totalStakes();
+  if (!ts || !mv || Math.abs(ts - mv) / mv < 0.005) return "";
+  return `<br><span class="warn">Entered values total ${fmtMoney(ts)} but the live market value is ${fmtMoney(mv)} — displayed values are scaled proportionally so they sum to ${fmtMoney(mv)}.</span>`;
+}
 function perfRowHTML(st) {
   return `
     <td class="num">${fmtMoney(st.principal)}</td>
@@ -846,8 +855,10 @@ function adminView() {
 
   <div class="panel">
     <h3>Investors</h3>
-    <div class="hint">Ownership is pro-rata to principal invested. Fund: <b>${fmtMoney(mv)}</b> market value vs <b>${fmtMoney(tp)}</b> principal
-      (<b class="${pctClass(mv-tp)}">${tp ? fmtPct((mv-tp)/tp) : "—"}</b>)</div>
+    <div class="hint"><b>Type each investor's Current value</b> (from your records) — gain is derived from it vs their principal.
+      Values then move with live prices, scaled so they always total the fund's market value.
+      Fund: <b>${fmtMoney(mv)}</b> market value vs <b>${fmtMoney(tp)}</b> principal
+      (<b class="${pctClass(mv-tp)}">${tp ? fmtPct((mv-tp)/tp) : "—"}</b>)${stakeDriftHTML(mv)}</div>
     <table><thead><tr><th>Name / email</th><th class="num">Principal</th><th class="num">Ownership</th><th class="num">Current value</th><th class="num">Gain</th><th></th></tr></thead>
     <tbody>${db.clients.map(c => {
       const st = clientStats(c);
@@ -859,8 +870,9 @@ function adminView() {
       </td>
       <td class="num">${fmtMoney(st.principal)}</td>
       <td class="num">${(st.frac*100).toFixed(1)}%</td>
-      <td class="num">${fmtMoney(st.value)}</td>
-      <td class="num ${pctClass(st.gain)}">${fmtPct(st.gainPct)}</td>
+      <td style="max-width:130px"><input class="tbl-input tbl-edit num" type="number" step="1" min="0" value="${Math.round(st.value)}"
+        onchange="app.editStake(${c.id}, this.value)" title="Type this investor's current value from your records"></td>
+      <td class="num ${pctClass(st.gain)}">${fmtMoney(st.gain)}<span class="sub-num ${pctClass(st.gain)}">${fmtPct(st.gainPct)}</span></td>
       <td style="text-align:right;white-space:nowrap">
         <button class="link-btn" onclick="app.toggleContrib(${c.id})">${open ? "Close" : "Edit contributions"}</button>
         <button class="link-btn" style="margin-left:10px" onclick="app.setViewer('${c.id}')">View portal</button>
@@ -888,7 +900,7 @@ function adminView() {
           ${c.contributions.length ? "" : `<tr><td colspan="3" class="muted" style="font-size:13px">No contributions — add one with the form below.</td></tr>`}
           </tbody>
         </table>
-        <div class="hint" style="margin:8px 0 0">To add another contribution, use the form below with this investor's email.</div>
+        <div class="hint" style="margin:8px 0 0">Contributions set the investor's <b>principal</b> (cost basis). Their <b>Current value</b> is edited directly in the table above. To add another contribution, use the form below with this investor's email.</div>
       </td></tr>` : ""}`;
     }).join("")}
     </tbody></table>
@@ -998,15 +1010,25 @@ window.app = {
     if (!(amt > 0)) { flash("inv-flash", "Enter a valid amount.", true); return; }
     let c = db.clients.find(x => x.email === email);
     let isNew = false;
-    if (c) c.contributions.push({ ym, amount: amt });
-    else {
+    if (c) {
+      c.stake = stakeOf(c) + amt; // new money adds to their current value
+      c.contributions.push({ ym, amount: amt });
+    } else {
       if (!name || !email.includes("@")) { flash("inv-flash", "Enter a name and valid email.", true); return; }
-      c = { id: Date.now(), name, email, contributions: [{ ym, amount: amt }] };
+      c = { id: Date.now(), name, email, stake: amt, contributions: [{ ym, amount: amt }] };
       db.clients.push(c);
       isNew = true;
     }
     storeAndSync(); render();
-    flash("inv-flash", fmtMoney(amt) + " contribution recorded for " + c.name + ".");
+    flash("inv-flash", fmtMoney(amt) + " contribution recorded for " + c.name + " (current value +" + fmtMoney(amt) + ").");
+  },
+  editStake(id, val) {
+    const c = db.clients.find(x => String(x.id) === String(id)); if (!c) return;
+    const n = parseFloat(val);
+    if (isNaN(n) || n < 0) { flash("inv-edit-flash", "Enter a valid current value.", true); render(); return; }
+    c.stake = n;
+    storeAndSync(); render();
+    flash("inv-edit-flash", c.name + "'s current value set to " + fmtMoney(n) + " — it now moves with live prices.");
   },
   delClient(id) { db.clients = db.clients.filter(c => c.id !== id); if (String(state.viewer) === String(id)) state.viewer = "fund"; storeAndSync(); render(); },
   toggleContrib(id) { state.editInv = String(state.editInv) === String(id) ? null : id; render(); },

@@ -35,6 +35,7 @@ export default async function handler(req, res) {
           id: x.id,
           name: x.name,
           email: "", // emails stay private to the admin
+          stake: typeof x.stake === "number" ? x.stake : undefined,
           contributions: x.contributions || []
         })),
         investorMode: true
