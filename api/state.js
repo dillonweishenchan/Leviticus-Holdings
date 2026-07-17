@@ -2,7 +2,7 @@
 //   - admin sessions:    full state, read + write
 //   - investor sessions: read-only, filtered to their own account
 //     (other investors' identities and amounts are never sent)
-import { readSession, readBlobJSON, writeBlobJSON, STATE_PATH } from "../lib/auth.js";
+import { readSession, readBlobJSON, writeBlobJSON, readBody, STATE_PATH } from "../lib/auth.js";
 
 // Aggregate cumulative principal by month (no identities) so investor
 // charts can show their ownership share over time without leaking data.
@@ -61,7 +61,7 @@ export default async function handler(req, res) {
 
     if (req.method === "PUT" || req.method === "POST") {
       if (s.role !== "admin") return res.status(403).json({ error: "forbidden" });
-      const body = req.body;
+      const body = await readBody(req); // robust for PUT and POST alike
       if (!body || typeof body !== "object" || !Array.isArray(body.holdings) || !Array.isArray(body.clients)) {
         return res.status(400).json({ error: "bad-body" });
       }

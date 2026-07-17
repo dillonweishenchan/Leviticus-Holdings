@@ -212,7 +212,7 @@ const DEFAULTS = () => ({
 });
 
 let db = DEFAULTS();
-const state = { viewer: "fund", tab: "overview", refreshing: false, lastMsg: "", lastSaved: 0 };
+const state = { viewer: "fund", tab: "overview", refreshing: false, lastMsg: "", lastSaved: 0, editInv: null, syncErr: "" };
 let cloudMode = "unknown"; // "on" | "nostore" | "none"
 
 /* Auth: "boot" (checking) | "local" (opened as a file — no accounts) |
@@ -261,11 +261,19 @@ async function cloudSave() {
   if (cloudMode !== "on" || auth.mode !== "in" || auth.role !== "admin") return;
   try {
     const r = await fetch("/api/state", {
-      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(db)
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(db)
     });
-    if (r.ok) { state.lastSaved = Date.now(); updateBanner(); }
+    if (r.ok) { state.lastSaved = Date.now(); state.syncErr = ""; updateBanner(); }
     else if (r.status === 401) sessionExpired();
-  } catch (e) { /* retried on next edit */ }
+    else {
+      const j = await r.json().catch(() => ({}));
+      state.syncErr = "SYNC ERROR (" + (j.error || "HTTP " + r.status) + ") — recent edits have NOT reached other devices; retrying…";
+      updateBanner();
+    }
+  } catch (e) {
+    state.syncErr = "SYNC ERROR (no connection) — recent edits have NOT reached other devices; retrying…";
+    updateBanner();
+  }
 }
 async function pollSync() {
   if (cloudMode !== "on") return;
@@ -280,6 +288,7 @@ async function pollSync() {
 }
 function bannerText() {
   if (auth.mode === "in") {
+    if (auth.role === "admin" && state.syncErr) return state.syncErr;
     return "Signed in as " + auth.name +
       (auth.role === "admin" ? " · edits sync to all devices" : " · your account only") +
       (state.lastSaved ? " · saved " + timeStr(state.lastSaved) : "");
@@ -828,20 +837,45 @@ function adminView() {
     <h3>Investors</h3>
     <div class="hint">Ownership is pro-rata to principal invested. Fund: <b>${fmtMoney(mv)}</b> market value vs <b>${fmtMoney(tp)}</b> principal
       (<b class="${pctClass(mv-tp)}">${tp ? fmtPct((mv-tp)/tp) : "—"}</b>)</div>
-    <table><thead><tr><th>Name</th><th class="num">Principal</th><th class="num">Ownership</th><th class="num">Current value</th><th class="num">Gain</th><th></th></tr></thead>
-    <tbody>${db.clients.map(c => { const st = clientStats(c); return `
-      <tr><td>${esc(c.name)}<br><span class="tkr">${esc(c.email)}</span></td>
+    <table><thead><tr><th>Name / email</th><th class="num">Principal</th><th class="num">Ownership</th><th class="num">Current value</th><th class="num">Gain</th><th></th></tr></thead>
+    <tbody>${db.clients.map(c => {
+      const st = clientStats(c);
+      const open = String(state.editInv) === String(c.id);
+      return `
+      <tr><td>
+        <input class="tbl-input" value="${esc(c.name)}" onchange="app.editClient(${c.id},'name',this.value)">
+        <input class="tbl-input" style="font-size:12px;color:var(--muted)" value="${esc(c.email)}" onchange="app.editClient(${c.id},'email',this.value)">
+      </td>
       <td class="num">${fmtMoney(st.principal)}</td>
       <td class="num">${(st.frac*100).toFixed(1)}%</td>
       <td class="num">${fmtMoney(st.value)}</td>
       <td class="num ${pctClass(st.gain)}">${fmtPct(st.gainPct)}</td>
       <td style="text-align:right;white-space:nowrap">
-        <button class="link-btn" onclick="app.setViewer('${c.id}')">View portal</button>
+        <button class="link-btn" onclick="app.toggleContrib(${c.id})">${open ? "Close" : "Edit contributions"}</button>
+        <button class="link-btn" style="margin-left:10px" onclick="app.setViewer('${c.id}')">View portal</button>
         <button class="link-btn" style="margin-left:10px" onclick="app.setPw(${c.id})">Set password</button>
         <button class="del-btn" title="Remove investor" onclick="app.delClient(${c.id})">✕</button>
-      </td></tr>`; }).join("")}
+      </td></tr>
+      ${open ? `
+      <tr><td colspan="6" style="background:#faf9f5;padding:14px 16px">
+        <b style="font-size:13px;color:var(--navy)">Contributions — ${esc(c.name)}</b>
+        <table style="margin-top:8px;max-width:540px">
+          <thead><tr><th style="width:170px">Month (YYYY-MM)</th><th class="num">Amount (USD)</th><th style="width:36px"></th></tr></thead>
+          <tbody>
+          ${c.contributions.map((k,j) => `
+            <tr>
+              <td><input class="tbl-input" value="${esc(k.ym)}" onchange="app.editContrib(${c.id},${j},'ym',this.value)"></td>
+              <td><input class="tbl-input num" type="number" step="1000" min="0" value="${k.amount}" onchange="app.editContrib(${c.id},${j},'amount',this.value)"></td>
+              <td><button class="del-btn" title="Remove contribution" onclick="app.delContrib(${c.id},${j})">✕</button></td>
+            </tr>`).join("")}
+          ${c.contributions.length ? "" : `<tr><td colspan="3" class="muted" style="font-size:13px">No contributions — add one with the form below.</td></tr>`}
+          </tbody>
+        </table>
+        <div class="hint" style="margin:8px 0 0">To add another contribution, use the form below with this investor's email. Changing the email changes how they sign in; their password stays the same.</div>
+      </td></tr>` : ""}`;
+    }).join("")}
     </tbody></table>
-    <div class="hint" style="margin-top:8px;margin-bottom:0"><b>Set password</b> generates a sign-in password for that investor (shown once — send it to them with the site link). They sign in with their email and see only their own account.</div>
+    <div class="hint" style="margin-top:8px;margin-bottom:0">Names and emails are editable in place. <b>Edit contributions</b> adjusts amounts and dates. <b>Set password</b> generates a sign-in password for that investor (shown once — send it to them with the site link).</div>
 
     <h3 style="margin-top:22px">Add investor / contribution</h3>
     <div class="hint">Use an existing email to record an additional contribution.</div>
@@ -971,6 +1005,41 @@ window.app = {
     if (isNew && auth.mode === "in" && auth.role === "admin") this.setPw(c.id); // show their password right away
   },
   delClient(id) { db.clients = db.clients.filter(c => c.id !== id); if (String(state.viewer) === String(id)) state.viewer = "fund"; storeAndSync(); render(); },
+  toggleContrib(id) { state.editInv = String(state.editInv) === String(id) ? null : id; render(); },
+  editClient(id, key, val) {
+    const c = db.clients.find(x => String(x.id) === String(id)); if (!c) return;
+    val = String(val).trim();
+    if (key === "email") {
+      val = val.toLowerCase();
+      if (!val.includes("@")) { flash("inv-flash", "Enter a valid email.", true); render(); return; }
+      if (db.clients.some(x => x.id !== c.id && x.email === val)) { flash("inv-flash", "That email is already used by another investor.", true); render(); return; }
+      c.email = val;
+      flash("inv-flash", c.name + " now signs in as " + val + " (same password).");
+    } else if (key === "name") {
+      if (!val) { render(); return; }
+      c.name = val;
+    }
+    storeAndSync(); render();
+  },
+  editContrib(id, j, key, val) {
+    const c = db.clients.find(x => String(x.id) === String(id));
+    if (!c || !c.contributions[j]) return;
+    if (key === "ym") {
+      val = String(val).trim();
+      if (!validYm(val)) { flash("inv-flash", "Enter the month as YYYY-MM (e.g. 2026-07).", true); render(); return; }
+      c.contributions[j].ym = val;
+    } else {
+      const n = parseFloat(val);
+      if (!(n > 0)) { flash("inv-flash", "Enter an amount above zero.", true); render(); return; }
+      c.contributions[j].amount = n;
+    }
+    storeAndSync(); render();
+  },
+  delContrib(id, j) {
+    const c = db.clients.find(x => String(x.id) === String(id)); if (!c) return;
+    c.contributions.splice(j, 1);
+    storeAndSync(); render();
+  },
   setKey() {
     db.key = $("api-key").value.trim();
     storeAndSync(); flash("set-flash", db.key ? "API key saved — refreshing quotes." : "API key cleared.");
@@ -1051,7 +1120,15 @@ setInterval(() => {
   if (typeof document.visibilityState === "string" && document.visibilityState !== "visible") return;
   refreshAll();
 }, 5 * 60 * 1000);
-setInterval(pollSync, 60 * 1000);
+setInterval(pollSync, 20 * 1000); // pick up other devices' edits within ~20s
+setInterval(() => { // auto-retry failed saves even without a new edit
+  if (state.syncErr && auth.mode === "in" && auth.role === "admin") cloudSave();
+}, 30 * 1000);
+try { // catch up immediately when this tab/device comes back into view
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && auth.mode === "in") { pollSync(); refreshAll(); }
+  });
+} catch (e) {}
 </script>
 </body>
 </html>

@@ -5,7 +5,7 @@
 import {
   readSession, sign, sessionCookie, clearCookie,
   hashPassword, verifyPassword, safeEqual,
-  readBlobJSON, writeBlobJSON, secretKey,
+  readBlobJSON, writeBlobJSON, readBody, secretKey,
   STATE_PATH, AUTH_PATH
 } from "../lib/auth.js";
 
@@ -35,7 +35,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "method-not-allowed" });
   }
 
-  const body = req.body || {};
+  const body = (await readBody(req)) || {};
   const action = body.action;
 
   if (action === "logout") {
