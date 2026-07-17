@@ -47,6 +47,9 @@
   .login-card .sub { color: var(--muted); font-size: 13.5px; margin: 4px 0 28px; }
   .login-error { color: var(--red); font-size: 13px; min-height: 18px; margin-top: 10px; }
   .login-note { color: var(--muted); font-size: 12px; margin-top: 18px; border-top: 1px dashed var(--line); padding-top: 14px; }
+  .seg { display: flex; gap: 6px; background: #f1efe8; border-radius: 10px; padding: 5px; margin-bottom: 16px; }
+  .seg button { flex: 1; border: none; background: transparent; cursor: pointer; font-size: 14px; font-weight: 600; color: var(--muted); padding: 9px 0; border-radius: 7px; font-family: inherit; }
+  .seg button.on { background: #fff; color: var(--navy); box-shadow: 0 1px 3px rgba(16,40,63,.12); }
   .login-foot { color: rgba(255,255,255,.55); font-size: 12px; text-align: center; position: fixed; bottom: 14px; left: 0; right: 0; }
   .setup-list { list-style: none; text-align: left; margin: 18px 0 6px; }
   .setup-list li { padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; margin-bottom: 8px; font-size: 13.5px; display: flex; gap: 10px; align-items: flex-start; }
@@ -214,7 +217,7 @@ const DEFAULTS = () => ({
 });
 
 let db = DEFAULTS();
-const state = { viewer: "fund", tab: "overview", refreshing: false, lastMsg: "", lastSaved: 0, editInv: null, syncErr: "" };
+const state = { viewer: "fund", tab: "overview", refreshing: false, lastMsg: "", lastSaved: 0, editInv: null, syncErr: "", loginRole: "investor" };
 let cloudMode = "unknown"; // "on" | "nostore" | "none"
 
 /* Auth: "boot" (checking) | "local" (opened as a file — no accounts) |
@@ -629,11 +632,14 @@ function loginView() {
       <div class="brand-mark serif">${esc((db.fund.name || "F").split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase())}</div>
       <h1 class="serif">${esc(db.fund.name)}</h1>
       <div class="sub">Investor Portal</div>
-      <div class="field"><label>USERNAME</label><input id="li-email" type="text" placeholder="admin or investor" autocomplete="username"></div>
+      <div class="seg">
+        <button class="${state.loginRole==='investor'?'on':''}" onclick="app.loginRole('investor')">Investor</button>
+        <button class="${state.loginRole==='admin'?'on':''}" onclick="app.loginRole('admin')">Fund manager</button>
+      </div>
       <div class="field"><label>PASSWORD</label><input id="li-pass" type="password" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')app.signIn()"></div>
-      <button class="btn btn-primary" id="li-btn" style="width:100%;margin-top:6px" onclick="app.signIn()">Sign in</button>
+      <button class="btn btn-primary" id="li-btn" style="width:100%;margin-top:6px" onclick="app.signIn()">Sign in as ${state.loginRole==='admin'?'fund manager':'investor'}</button>
       <div class="login-error" id="li-err"></div>
-      <div class="login-note">Investors: username <b>investor</b> with the shared password from the fund manager.<br>Fund manager: username <b>admin</b>.</div>
+      <div class="login-note">Investors use the shared password from the fund manager. Choose <b>Fund manager</b> to sign in as admin.</div>
     </div>
     <div class="login-foot">Secured with signed session cookies · sessions last 7 days</div>
   </div></div>`;
@@ -905,25 +911,38 @@ function adminView() {
         <div class="hint" style="margin:8px 0 0"><b>${esc(c.name)} holds ${unitsOf(c).toLocaleString(undefined,{maximumFractionDigits:2})} units = ${(fracOf(c)*100).toFixed(1)}% of the fund.</b>
           Current value = units × unit price (now ${fmtPrice(unitPrice())}). Backfilled entries default to $1.00/unit —
           set each entry's real <b>Entry $/unit</b> (the fund's unit price when that money came in) and units, value and gain update automatically.</div>
-        <div class="hint" style="margin:8px 0 0">To add another contribution, use the form below with this investor's email.</div>
+        <div class="hint" style="margin:8px 0 0">To add another contribution, use the <b>Add a contribution</b> section below and pick this investor from the dropdown.</div>
       </td></tr>` : ""}`;
     }).join("")}
     </tbody></table>
     <div class="flash" id="inv-edit-flash"></div>
     <div class="hint" style="margin-top:4px;margin-bottom:0">Names and emails are editable in place — click, type, and press Tab or Enter to save. <b>Edit contributions</b> opens details. All investors sign in with the shared <b>investor</b> login (set INVESTOR_PASSWORD in Vercel); emails here are just labels for you.</div>
 
-    <h3 style="margin-top:22px">Add investor / contribution</h3>
-    <div class="hint">Use an existing email to record an additional contribution. Entry price defaults to the current unit price (right for new money); override it for backdated contributions.</div>
+    <h3 style="margin-top:22px">Add a new investor</h3>
+    <div class="hint">Creates a new investor with their first contribution. Entry price defaults to the current unit price (right for new money); override it for a backdated first investment.</div>
     <div class="inline-form">
-      <div class="field"><label>NAME</label><input id="inv-name" placeholder="Full name"></div>
-      <div class="field"><label>EMAIL</label><input id="inv-email" placeholder="email@example.com"></div>
-      <div class="field"><label>AMOUNT (USD)</label><input id="inv-amt" type="number" step="1000" placeholder="250000"></div>
-      <div class="field"><label>MONTH (YYYY-MM)</label><input id="inv-ym" value="${nowYm()}"></div>
-      <div class="field"><label>ENTRY $/UNIT</label><input id="inv-price" type="number" step="0.0001" value="${unitPrice().toFixed(4)}"></div>
-      <button class="btn btn-gold" style="width:auto" onclick="app.addInvestor()">Add</button>
+      <div class="field"><label>NAME</label><input id="ni-name" placeholder="Full name"></div>
+      <div class="field"><label>EMAIL</label><input id="ni-email" placeholder="email@example.com"></div>
+      <div class="field"><label>AMOUNT (USD)</label><input id="ni-amt" type="number" step="1000" placeholder="250000"></div>
+      <div class="field"><label>MONTH (YYYY-MM)</label><input id="ni-ym" value="${nowYm()}"></div>
+      <div class="field"><label>ENTRY $/UNIT</label><input id="ni-price" type="number" step="0.0001" value="${unitPrice().toFixed(4)}"></div>
+      <button class="btn btn-gold" style="width:auto" onclick="app.addInvestor()">Add investor</button>
     </div>
-    <div class="hint" style="margin-top:6px">Recording a contribution adds that amount to the fund's cash balance (new money enters as cash). Deploy it into positions afterwards and lower the cash balance to match.</div>
-    <div class="flash" id="inv-flash"></div>
+    <div class="flash" id="ni-flash"></div>
+
+    <h3 style="margin-top:22px">Add a contribution</h3>
+    <div class="hint">Records additional money from an existing investor. Entry price defaults to the current unit price; override it for a backdated contribution.</div>
+    ${db.clients.length ? `
+    <div class="inline-form">
+      <div class="field"><label>INVESTOR</label>
+        <select id="ac-sel">${db.clients.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}</select></div>
+      <div class="field"><label>AMOUNT (USD)</label><input id="ac-amt" type="number" step="1000" placeholder="250000"></div>
+      <div class="field"><label>MONTH (YYYY-MM)</label><input id="ac-ym" value="${nowYm()}"></div>
+      <div class="field"><label>ENTRY $/UNIT</label><input id="ac-price" type="number" step="0.0001" value="${unitPrice().toFixed(4)}"></div>
+      <button class="btn btn-gold" style="width:auto" onclick="app.addContribution()">Add contribution</button>
+    </div>
+    <div class="flash" id="ac-flash"></div>` : `<div class="hint">No investors yet — add one above first.</div>`}
+    <div class="hint" style="margin-top:6px">Any contribution adds that amount to the fund's cash balance (new money enters as cash). Deploy it into positions afterwards and lower the cash balance to match.</div>
   </div>
 
   <div class="panel">
@@ -961,22 +980,24 @@ window.app = {
   },
   refresh() { refreshAll(); },
 
+  loginRole(r) { state.loginRole = r; render(); const p = $("li-pass"); if (p) p.focus(); },
   async signIn() {
-    const email = ($("li-email") ? $("li-email").value : "").trim();
+    const role = state.loginRole === "admin" ? "admin" : "investor";
     const pw = $("li-pass") ? $("li-pass").value : "";
+    const label = role === "admin" ? "fund manager" : "investor";
     const btn = $("li-btn"); if (btn) { btn.disabled = true; btn.textContent = "Signing in…"; }
-    const fail = (msg) => { const e = $("li-err"); if (e) e.textContent = msg; if (btn) { btn.disabled = false; btn.textContent = "Sign in"; } };
-    if (!email || !pw) return fail("Enter your email and password.");
+    const fail = (msg) => { const e = $("li-err"); if (e) e.textContent = msg; if (btn) { btn.disabled = false; btn.textContent = "Sign in as " + label; } };
+    if (!pw) return fail("Enter the password.");
     try {
       const r = await fetch("/api/auth", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "login", email, password: pw })
+        body: JSON.stringify({ action: "login", email: role, password: pw })
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) {
         return fail(j.error === "investor-login-not-configured"
           ? "Investor sign-in isn't set up yet — add INVESTOR_PASSWORD in Vercel and redeploy."
-          : "Username or password incorrect.");
+          : "Password incorrect for " + label + ".");
       }
       enterApp(j);
     } catch (e) { fail("Could not reach the server — try again."); }
@@ -1008,31 +1029,42 @@ window.app = {
   addH() { db.holdings.push({ t:"", name:"", cls:"US Equity", sh:0, fb:0 }); storeAndSync(); render(); },
   setCash(v) { const n = parseFloat(v); db.cash = isNaN(n) || n < 0 ? 0 : n; storeAndSync(); render(); },
 
-  addInvestor() {
-    const name = $("inv-name").value.trim();
-    const email = $("inv-email").value.trim().toLowerCase();
-    const amt = parseFloat($("inv-amt").value);
-    const ym = $("inv-ym").value.trim();
-    let eprice = parseFloat($("inv-price") ? $("inv-price").value : "");
-    if (!(eprice > 0)) eprice = unitPrice();
-    if (!validYm(ym)) { flash("inv-flash", "Enter month as YYYY-MM.", true); return; }
-    if (!(amt > 0)) { flash("inv-flash", "Enter a valid amount.", true); return; }
+  // A contribution is cash into the fund: increasing cash by the same amount
+  // keeps the unit price (NAV) continuous, so new money starts at 0% gain.
+  _recordContribution(c, amt, ym, eprice, flashId) {
     const units = amt / eprice;
-    let c = db.clients.find(x => x.email === email);
-    let isNew = false;
-    if (c) c.contributions.push({ ym, amount: amt, units });
-    else {
-      if (!name || !email.includes("@")) { flash("inv-flash", "Enter a name and valid email.", true); return; }
-      c = { id: Date.now(), name, email, contributions: [{ ym, amount: amt, units }] };
-      db.clients.push(c);
-      isNew = true;
-    }
-    // A contribution is cash into the fund: increasing cash by the same amount
-    // keeps the unit price (NAV) continuous, so new money starts at 0% gain.
-    // (Deploy it into positions later and reduce cash accordingly.)
+    c.contributions.push({ ym, amount: amt, units });
     db.cash = (db.cash || 0) + amt;
     storeAndSync(); render();
-    flash("inv-flash", fmtMoney(amt) + " recorded for " + c.name + " at " + fmtPrice(eprice) + "/unit (" + units.toLocaleString(undefined,{maximumFractionDigits:2}) + " units); fund cash +" + fmtMoney(amt) + ".");
+    flash(flashId, fmtMoney(amt) + " recorded for " + c.name + " at " + fmtPrice(eprice) + "/unit (" +
+      units.toLocaleString(undefined,{maximumFractionDigits:2}) + " units); fund cash +" + fmtMoney(amt) + ".");
+  },
+  addInvestor() {
+    const name = $("ni-name").value.trim();
+    const email = $("ni-email").value.trim().toLowerCase();
+    const amt = parseFloat($("ni-amt").value);
+    const ym = $("ni-ym").value.trim();
+    let eprice = parseFloat($("ni-price") ? $("ni-price").value : "");
+    if (!(eprice > 0)) eprice = unitPrice();
+    if (!name || !email.includes("@")) { flash("ni-flash", "Enter a name and valid email.", true); return; }
+    if (db.clients.some(x => x.email === email)) { flash("ni-flash", "That email already exists — use “Add a contribution” below.", true); return; }
+    if (!validYm(ym)) { flash("ni-flash", "Enter month as YYYY-MM.", true); return; }
+    if (!(amt > 0)) { flash("ni-flash", "Enter a valid amount.", true); return; }
+    const c = { id: Date.now(), name, email, contributions: [] };
+    db.clients.push(c);
+    this._recordContribution(c, amt, ym, eprice, "ni-flash");
+  },
+  addContribution() {
+    const sel = $("ac-sel"); if (!sel) return;
+    const c = db.clients.find(x => String(x.id) === String(sel.value));
+    if (!c) { flash("ac-flash", "Pick an investor.", true); return; }
+    const amt = parseFloat($("ac-amt").value);
+    const ym = $("ac-ym").value.trim();
+    let eprice = parseFloat($("ac-price") ? $("ac-price").value : "");
+    if (!(eprice > 0)) eprice = unitPrice();
+    if (!validYm(ym)) { flash("ac-flash", "Enter month as YYYY-MM.", true); return; }
+    if (!(amt > 0)) { flash("ac-flash", "Enter a valid amount.", true); return; }
+    this._recordContribution(c, amt, ym, eprice, "ac-flash");
   },
   delClient(id) { db.clients = db.clients.filter(c => c.id !== id); if (String(state.viewer) === String(id)) state.viewer = "fund"; storeAndSync(); render(); },
   toggleContrib(id) { state.editInv = String(state.editInv) === String(id) ? null : id; render(); },
