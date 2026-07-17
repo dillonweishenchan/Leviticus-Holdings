@@ -678,11 +678,6 @@ function shellView() {
   if (admin) tabs.push(["admin","Admin"]);
   if (!admin && state.tab === "admin") state.tab = "overview";
   const body = state.tab === "holdings" ? holdingsView() : (state.tab === "admin" && admin) ? adminView() : overviewView();
-  const switcher = `
-    <select class="viewer-sel" onchange="app.setViewer(this.value)">
-      <option value="fund" ${state.viewer==="fund"?"selected":""}>Viewing: whole fund</option>
-      ${db.clients.map(c => `<option value="${c.id}" ${String(state.viewer)===String(c.id)?"selected":""}>Viewing: ${esc(c.name)}</option>`).join("")}
-    </select>`;
   const signout = auth.mode === "in"
     ? `<a style="color:rgba(255,255,255,.75);cursor:pointer;font-size:13.5px;white-space:nowrap" onclick="app.signOut()">Sign out</a>` : "";
   return `
@@ -692,7 +687,6 @@ function shellView() {
     <div class="nav-tabs">
       ${tabs.map(([k,l]) => `<button class="${state.tab===k?'active':''}" onclick="app.tab('${k}')">${l}</button>`).join("")}
     </div>
-    ${switcher}
     ${signout}
   </div>
   <div class="page">${body}</div>
@@ -733,7 +727,10 @@ function overviewView() {
   const st = clientStats(c);
   const series = clientSeries(c);
   return `
-  <div class="page-head"><h2 class="serif">${esc(c.name)} — account overview</h2><span class="asof" id="px-status">${statusHTML()}</span></div>
+  <div class="page-head">
+    <h2 class="serif">${esc(c.name)} — account overview ${isAdminUI() ? `<button class="link-btn" style="font-size:14px;margin-left:10px" onclick="app.setViewer('fund')">← Back to fund view</button>` : ""}</h2>
+    <span class="asof" id="px-status">${statusHTML()}</span>
+  </div>
   <div class="cards">
     <div class="card accent"><div class="k">Account value</div><div class="v">${fmtMoney(st.value)}</div><div class="s">${(st.frac*100).toFixed(1)}% ownership of fund</div></div>
     <div class="card"><div class="k">Principal invested</div><div class="v">${fmtMoney(st.principal)}</div><div class="s">first investment ${st.firstYm ? monthLabel(st.firstYm) : "—"}</div></div>
@@ -943,6 +940,19 @@ function adminView() {
     </div>
     <div class="flash" id="ac-flash"></div>` : `<div class="hint">No investors yet — add one above first.</div>`}
     <div class="hint" style="margin-top:6px">Any contribution adds that amount to the fund's cash balance (new money enters as cash). Deploy it into positions afterwards and lower the cash balance to match.</div>
+
+    <h3 style="margin-top:22px">Withdraw funds</h3>
+    <div class="hint">Records a redemption: the investor's units are sold at the current unit price (${fmtPrice(unitPrice())}) and the amount leaves the fund's cash. Their gain % is preserved on the remaining balance.</div>
+    ${db.clients.length ? `
+    <div class="inline-form">
+      <div class="field"><label>INVESTOR</label>
+        <select id="wd-sel">${db.clients.map(c => { const v = clientStats(c).value; return `<option value="${c.id}">${esc(c.name)} — ${fmtMoney(v)} available</option>`; }).join("")}</select></div>
+      <div class="field"><label>AMOUNT (USD)</label><input id="wd-amt" type="number" step="1000" placeholder="50000"></div>
+      <div class="field"><label>MONTH (YYYY-MM)</label><input id="wd-ym" value="${nowYm()}"></div>
+      <button class="btn btn-ghost" style="width:auto" onclick="app.withdraw()">Withdraw</button>
+    </div>
+    <div class="flash" id="wd-flash"></div>` : `<div class="hint">No investors yet.</div>`}
+    <div class="hint" style="margin-top:6px">A withdrawal reduces the fund's cash balance by the amount paid out. Sell positions to fund it and raise cash beforehand if needed.</div>
   </div>
 
   <div class="panel">
@@ -975,6 +985,7 @@ function adminView() {
 window.app = {
   tab(t) { if (t === "admin" && !isAdminUI()) t = "overview"; state.tab = t; render(); },
   setViewer(v) {
+    if (!isAdminUI()) return; // only the admin previews individual accounts
     state.viewer = v;
     render();
   },
@@ -1065,6 +1076,29 @@ window.app = {
     if (!validYm(ym)) { flash("ac-flash", "Enter month as YYYY-MM.", true); return; }
     if (!(amt > 0)) { flash("ac-flash", "Enter a valid amount.", true); return; }
     this._recordContribution(c, amt, ym, eprice, "ac-flash");
+  },
+  withdraw() {
+    const sel = $("wd-sel"); if (!sel) return;
+    const c = db.clients.find(x => String(x.id) === String(sel.value));
+    if (!c) { flash("wd-flash", "Pick an investor.", true); return; }
+    const amt = parseFloat($("wd-amt").value);
+    const ym = $("wd-ym").value.trim();
+    if (!validYm(ym)) { flash("wd-flash", "Enter month as YYYY-MM.", true); return; }
+    if (!(amt > 0)) { flash("wd-flash", "Enter a valid amount.", true); return; }
+    const cur = clientStats(c).value;
+    if (amt > cur + 0.005) { flash("wd-flash", "Can't withdraw more than " + fmtMoney(cur) + " (their current value).", true); return; }
+    const frac = cur > 0 ? amt / cur : 0;
+    // Redeem units pro-rata: scale each contribution's units and cost basis down
+    // by the withdrawn fraction. Entry prices and gain % are preserved.
+    const full = frac >= 0.9999;
+    if (full) {
+      c.contributions = [{ ym, amount: 0, units: 0 }];
+    } else {
+      for (const k of c.contributions) { k.units = (k.units > 0 ? k.units : k.amount) * (1 - frac); k.amount = k.amount * (1 - frac); }
+    }
+    db.cash = (db.cash || 0) - amt; // cash paid out of the fund
+    storeAndSync(); render();
+    flash("wd-flash", fmtMoney(amt) + " withdrawn for " + c.name + (full ? " (position closed)" : "") + "; fund cash −" + fmtMoney(amt) + ".");
   },
   delClient(id) { db.clients = db.clients.filter(c => c.id !== id); if (String(state.viewer) === String(id)) state.viewer = "fund"; storeAndSync(); render(); },
   toggleContrib(id) { state.editInv = String(state.editInv) === String(id) ? null : id; render(); },

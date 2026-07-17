@@ -29,7 +29,7 @@ Open the site. Until steps 3–5 are done it shows a setup checklist; after that
 ## Using it
 
 - **Sign in as admin** — username `admin`, password: your `ADMIN_PASSWORD`.
-- **Admin tab** — positions (ticker + shares), cash, investors and contributions, fund name and YTD (Settings).
+- **Admin tab** — positions (ticker + shares), cash, add investors, add contributions, withdraw funds, fund name and YTD (Settings). Adding a contribution raises the fund's cash by that amount; a withdrawal lowers it (units are redeemed at the current unit price, and the investor's gain % is preserved on the remaining balance).
 - **Give investors access** — send them the site URL + username `investor` + the shared `INVESTOR_PASSWORD`. To change it later, update the env var in Vercel and redeploy.
 - **Viewer menu** — everyone can switch between the whole fund and any investor's view; only the admin can edit.
 - Sessions last 7 days; **Sign out** is in the top bar.
