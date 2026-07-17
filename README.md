@@ -17,7 +17,7 @@ An investor portal with real sign-in: live stock prices, holdings entered as tic
    Project → **Settings → Environment Variables** → add `ADMIN_PASSWORD` with a strong password of your choosing (apply to all environments).
 
 4. **Create the storage.**
-   Project → **Storage** tab → **Create Database → Blob** → create and **Connect** to this project (adds `BLOB_READ_WRITE_TOKEN` automatically).
+   Project → **Storage** tab → **Create Database → Blob** → create and **Connect** to this project (adds `BLOB_READ_WRITE_TOKEN` automatically). If asked to choose an access mode, **Private** is recommended (both work — the app auto-detects).
 
 5. **Redeploy once.**
    **Deployments** tab → latest → **⋯ → Redeploy**, so both variables take effect.
