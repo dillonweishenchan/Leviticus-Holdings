@@ -24,8 +24,6 @@ export default async function handler(req, res) {
 
       if (s.role === "admin") return res.status(200).json({ state });
 
-      const me = (state.clients || []).find(c => String(c.id) === String(s.cid));
-      if (!me) return res.status(403).json({ error: "no-account" });
       const filtered = {
         at: state.at || 0,
         fund: state.fund,
@@ -36,7 +34,7 @@ export default async function handler(req, res) {
         clients: (state.clients || []).map(x => ({
           id: x.id,
           name: x.name,
-          email: String(x.id) === String(s.cid) ? x.email : "", // emails stay private
+          email: "", // emails stay private to the admin
           contributions: x.contributions || []
         })),
         investorMode: true

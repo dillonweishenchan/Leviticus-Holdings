@@ -293,7 +293,7 @@ function bannerText() {
   if (auth.mode === "in") {
     if (auth.role === "admin" && state.syncErr) return state.syncErr;
     return "Signed in as " + auth.name +
-      (auth.role === "admin" ? " · edits sync to all devices" : " · your account only") +
+      (auth.role === "admin" ? " · edits sync to all devices" : " · read-only") +
       (state.lastSaved ? " · saved " + timeStr(state.lastSaved) : "");
   }
   if (cloudMode === "nostore") return "Deployed, but not configured — see the setup checklist";
@@ -442,43 +442,10 @@ function totalPrincipal(uptoYm) {
   }
   return db.clients.reduce((s,c) => s + principalOf(c, uptoYm), 0);
 }
-/* Ownership is TIME-AWARE and fully automatic: each contribution is indexed
-   to the fund's market-value history from its date onward, so money invested
-   earlier has grown more. Shares are normalized so all investors always sum
-   to the live market value. (Until price history loads, this gracefully
-   falls back to simple principal shares.) */
-let _perfCache = null;
-function fundSeriesCached() { if (!_perfCache) _perfCache = fundSeries(); return _perfCache; }
-function Vat(series, ym) {
-  if (!series.length) return 1;
-  let best = null;
-  for (const p of series) { if (p.ym <= ym) best = p.value; else break; }
-  return best ?? series[0].value;
-}
-/* Aggregate contribution inflows by month — from full records (admin) or the
-   anonymous tpSeries the server sends investor sessions. */
-function inflowEvents() {
-  if (db.tpSeries && db.tpSeries.length) {
-    const out = []; let prev = 0;
-    for (const p of db.tpSeries) { const d = p.total - prev; if (d > 0) out.push({ ym: p.ym, amount: d }); prev = p.total; }
-    return out;
-  }
-  const m = {};
-  for (const c of db.clients) for (const k of c.contributions) if (k.amount > 0) m[k.ym] = (m[k.ym] || 0) + k.amount;
-  return Object.keys(m).sort().map(ym => ({ ym, amount: m[ym] }));
-}
-function grownValue(events, series, uptoYm) {
-  const Vref = uptoYm ? Vat(series, uptoYm) : (series.length ? series[series.length-1].value : 1);
-  let s = 0;
-  for (const e of events) if (!uptoYm || e.ym <= uptoYm) s += e.amount * (Vref / Vat(series, e.ym));
-  return s;
-}
-function fracOf(c, uptoYm) {
-  const series = fundSeriesCached();
-  const all = grownValue(inflowEvents(), series, uptoYm);
-  if (!all) return 0;
-  return grownValue(c.contributions, series, uptoYm) / all;
-}
+/* Ownership is pro-rata to principal invested — contribution dates are NOT
+   used. value = share of principal × market value; gain % = (value − principal)
+   ÷ principal. Note: this makes every investor's gain % equal the fund's. */
+function fracOf(c, uptoYm) { const tp = totalPrincipal(uptoYm); return tp ? principalOf(c, uptoYm) / tp : 0; }
 /* The fund's YTD figure is entered manually in Settings (e.g. from IBKR) — never computed. */
 function manualYtd() { return (db.ytd === null || db.ytd === undefined || db.ytd === "") ? null : db.ytd / 100; }
 
@@ -636,7 +603,6 @@ function donutHTML(segs) {
 
 /* ================= Views ================= */
 function render() {
-  _perfCache = null; // holdings/quotes/contributions may have changed
   try { document.title = db.fund.name + " — Investor Portal"; } catch (e) {}
   if (auth.mode === "boot") { $("root").innerHTML = `<div class="loading-wrap">Loading portal…</div>`; return; }
   if (auth.mode === "setup") { $("root").innerHTML = setupView(); return; }
@@ -652,11 +618,11 @@ function loginView() {
       <div class="brand-mark serif">${esc((db.fund.name || "F").split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase())}</div>
       <h1 class="serif">${esc(db.fund.name)}</h1>
       <div class="sub">Investor Portal</div>
-      <div class="field"><label>EMAIL</label><input id="li-email" type="text" placeholder="you@example.com" autocomplete="username"></div>
+      <div class="field"><label>USERNAME</label><input id="li-email" type="text" placeholder="admin or investor" autocomplete="username"></div>
       <div class="field"><label>PASSWORD</label><input id="li-pass" type="password" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')app.signIn()"></div>
       <button class="btn btn-primary" id="li-btn" style="width:100%;margin-top:6px" onclick="app.signIn()">Sign in</button>
       <div class="login-error" id="li-err"></div>
-      <div class="login-note">Investors: your password comes from the fund manager.<br>Fund manager: sign in with the username <b>admin</b>.</div>
+      <div class="login-note">Investors: username <b>investor</b> with the shared password from the fund manager.<br>Fund manager: username <b>admin</b>.</div>
     </div>
     <div class="login-foot">Secured with signed session cookies · sessions last 7 days</div>
   </div></div>`;
@@ -674,6 +640,7 @@ function setupView() {
       <ul class="setup-list">
         ${item(f.blob, "<b>Blob storage</b> — Storage tab → Create Database → Blob → Connect to this project")}
         ${item(f.admin, "<b>Admin password</b> — Settings → Environment Variables → add <b>ADMIN_PASSWORD</b> (all environments)")}
+        ${item(f.investor, "<b>Investor password</b> — add <b>INVESTOR_PASSWORD</b> the same way (one shared login for all investors)")}
         ${item(false, "<b>Redeploy</b> — Deployments → ⋯ → Redeploy, then reload this page")}
       </ul>
       <div class="login-note">Full instructions are in the README. Nothing is accessible until setup is complete.</div>
@@ -694,11 +661,11 @@ function shellView() {
   if (admin) tabs.push(["admin","Admin"]);
   if (!admin && state.tab === "admin") state.tab = "overview";
   const body = state.tab === "holdings" ? holdingsView() : (state.tab === "admin" && admin) ? adminView() : overviewView();
-  const switcher = admin ? `
+  const switcher = `
     <select class="viewer-sel" onchange="app.setViewer(this.value)">
       <option value="fund" ${state.viewer==="fund"?"selected":""}>Viewing: whole fund</option>
       ${db.clients.map(c => `<option value="${c.id}" ${String(state.viewer)===String(c.id)?"selected":""}>Viewing: ${esc(c.name)}</option>`).join("")}
-    </select>` : "";
+    </select>`;
   const signout = auth.mode === "in"
     ? `<a style="color:rgba(255,255,255,.75);cursor:pointer;font-size:13.5px;white-space:nowrap" onclick="app.signOut()">Sign out</a>` : "";
   return `
@@ -741,7 +708,7 @@ function overviewView() {
     </div>
     <div class="panel">
       <h3>Investor performance</h3>
-      <div class="hint">Marked to the latest prices. Gains differ by timing: each contribution grows with the fund's market value from the month it was invested.</div>
+      <div class="hint">Each investor's position, marked to the latest prices</div>
       <table><thead><tr><th>Investor</th><th class="num">Principal</th><th class="num">Ownership</th><th class="num">Current value</th><th class="num">Gain ($)</th><th class="num">Gain (%)</th></tr></thead>
       <tbody>${db.clients.map(x => `<tr><td>${esc(x.name)}</td>${perfRowHTML(clientStats(x))}</tr>`).join("")}</tbody></table>
     </div>`;
@@ -763,9 +730,9 @@ function overviewView() {
   </div>
   <div class="panel">
     <h3>Investor performance</h3>
-    <div class="hint">All investors, marked to the latest prices. Gains differ by timing: each contribution grows with the fund's market value from the month it was invested.</div>
+    <div class="hint">All investors, marked to the latest prices</div>
     <table><thead><tr><th>Investor</th><th class="num">Principal</th><th class="num">Ownership</th><th class="num">Current value</th><th class="num">Gain ($)</th><th class="num">Gain (%)</th></tr></thead>
-    <tbody>${db.clients.map(x => `<tr><td>${esc(x.name)}${String(x.id)===String(c.id) ? ' <span class="pill" style="margin-left:6px">you</span>' : ""}</td>${perfRowHTML(clientStats(x))}</tr>`).join("")}</tbody></table>
+    <tbody>${db.clients.map(x => `<tr><td>${esc(x.name)}${String(x.id)===String(c.id) ? ' <span class="pill" style="margin-left:6px">viewing</span>' : ""}</td>${perfRowHTML(clientStats(x))}</tr>`).join("")}</tbody></table>
   </div>`;
 }
 function perfRowHTML(st) {
@@ -879,8 +846,7 @@ function adminView() {
 
   <div class="panel">
     <h3>Investors</h3>
-    <div class="hint">Ownership reflects contribution timing — earlier money has grown more (indexed to the fund's price history automatically).
-      Fund: <b>${fmtMoney(mv)}</b> market value vs <b>${fmtMoney(tp)}</b> principal
+    <div class="hint">Ownership is pro-rata to principal invested. Fund: <b>${fmtMoney(mv)}</b> market value vs <b>${fmtMoney(tp)}</b> principal
       (<b class="${pctClass(mv-tp)}">${tp ? fmtPct((mv-tp)/tp) : "—"}</b>)</div>
     <table><thead><tr><th>Name / email</th><th class="num">Principal</th><th class="num">Ownership</th><th class="num">Current value</th><th class="num">Gain</th><th></th></tr></thead>
     <tbody>${db.clients.map(c => {
@@ -898,7 +864,6 @@ function adminView() {
       <td style="text-align:right;white-space:nowrap">
         <button class="link-btn" onclick="app.toggleContrib(${c.id})">${open ? "Close" : "Edit contributions"}</button>
         <button class="link-btn" style="margin-left:10px" onclick="app.setViewer('${c.id}')">View portal</button>
-        <button class="link-btn" style="margin-left:10px" onclick="app.setPw(${c.id})">Set password</button>
         <button class="del-btn" title="Remove investor" onclick="app.delClient(${c.id})">✕</button>
       </td></tr>
       ${open ? `
@@ -923,12 +888,12 @@ function adminView() {
           ${c.contributions.length ? "" : `<tr><td colspan="3" class="muted" style="font-size:13px">No contributions — add one with the form below.</td></tr>`}
           </tbody>
         </table>
-        <div class="hint" style="margin:8px 0 0">To add another contribution, use the form below with this investor's email. Changing the email changes how they sign in; their password stays the same.</div>
+        <div class="hint" style="margin:8px 0 0">To add another contribution, use the form below with this investor's email.</div>
       </td></tr>` : ""}`;
     }).join("")}
     </tbody></table>
     <div class="flash" id="inv-edit-flash"></div>
-    <div class="hint" style="margin-top:4px;margin-bottom:0">Names and emails are editable in place — click, type, and press Tab or Enter to save. <b>Edit</b> opens details and contributions. <b>Set password</b> generates a sign-in password for that investor (shown once — send it to them with the site link).</div>
+    <div class="hint" style="margin-top:4px;margin-bottom:0">Names and emails are editable in place — click, type, and press Tab or Enter to save. <b>Edit contributions</b> opens details. All investors sign in with the shared <b>investor</b> login (set INVESTOR_PASSWORD in Vercel); emails here are just labels for you.</div>
 
     <h3 style="margin-top:22px">Add investor / contribution</h3>
     <div class="hint">Use an existing email to record an additional contribution.</div>
@@ -972,7 +937,6 @@ function adminView() {
 window.app = {
   tab(t) { if (t === "admin" && !isAdminUI()) t = "overview"; state.tab = t; render(); },
   setViewer(v) {
-    if (!isAdminUI()) return; // investors are locked to their own account
     state.viewer = v;
     render();
   },
@@ -991,9 +955,9 @@ window.app = {
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) {
-        return fail(j.error === "no-password"
-          ? "No password has been set for this account yet — ask the fund manager."
-          : "Email or password incorrect.");
+        return fail(j.error === "investor-login-not-configured"
+          ? "Investor sign-in isn't set up yet — add INVESTOR_PASSWORD in Vercel and redeploy."
+          : "Username or password incorrect.");
       }
       enterApp(j);
     } catch (e) { fail("Could not reach the server — try again."); }
@@ -1001,23 +965,6 @@ window.app = {
   async signOut() {
     try { await fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "logout" }) }); } catch (e) {}
     sessionExpired();
-  },
-  async setPw(cid) {
-    const c = db.clients.find(x => String(x.id) === String(cid));
-    if (!c) return;
-    if (auth.mode !== "in" || auth.role !== "admin") {
-      flash("inv-edit-flash", "Investor passwords can only be set on the deployed, signed-in site.", true); return;
-    }
-    const pw = genPw();
-    try {
-      const r = await fetch("/api/auth", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "set-password", cid: String(cid), password: pw })
-      });
-      if (r.status === 401) return sessionExpired();
-      if (!r.ok) throw new Error("http " + r.status);
-      flashHTML("inv-edit-flash", "Password for <b>" + esc(c.name) + "</b>: <b style=\"font-size:15px\">" + esc(pw) + "</b> — copy it now, it won't be shown again.");
-    } catch (e) { flash("inv-edit-flash", "Could not set the password — try again.", true); }
   },
 
   editFund(k, v) {
@@ -1060,7 +1007,6 @@ window.app = {
     }
     storeAndSync(); render();
     flash("inv-flash", fmtMoney(amt) + " contribution recorded for " + c.name + ".");
-    if (isNew && auth.mode === "in" && auth.role === "admin") this.setPw(c.id); // show their password right away
   },
   delClient(id) { db.clients = db.clients.filter(c => c.id !== id); if (String(state.viewer) === String(id)) state.viewer = "fund"; storeAndSync(); render(); },
   toggleContrib(id) { state.editInv = String(state.editInv) === String(id) ? null : id; render(); },
@@ -1072,7 +1018,7 @@ window.app = {
       if (!val.includes("@")) { flash("inv-edit-flash", "Enter a valid email.", true); render(); return; }
       if (db.clients.some(x => x.id !== c.id && x.email === val)) { flash("inv-edit-flash", "That email is already used by another investor.", true); render(); return; }
       c.email = val;
-      flash("inv-edit-flash", c.name + " now signs in as " + val + " (same password).");
+      flash("inv-edit-flash", "Email updated for " + c.name + ".");
     } else if (key === "name") {
       if (!val) { render(); return; }
       c.name = val;
@@ -1134,14 +1080,6 @@ function flashHTML(id, html) {
   el.innerHTML = html;
   el.className = "flash";
 }
-function genPw() {
-  const chars = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789";
-  const rnd = new Uint32Array(10);
-  try { crypto.getRandomValues(rnd); } catch (e) { for (let i = 0; i < 10; i++) rnd[i] = Math.floor(Math.random() * 1e9); }
-  let out = "";
-  for (let i = 0; i < 10; i++) out += chars[rnd[i] % chars.length];
-  return out;
-}
 
 function afterRender() {
   if (state.tab === "overview") {
@@ -1153,10 +1091,9 @@ function afterRender() {
 
 /* ================= Boot ================= */
 async function enterApp(sess) {
-  auth.mode = "in"; auth.role = sess.role; auth.name = sess.name; auth.cid = sess.cid;
+  auth.mode = "in"; auth.role = sess.role; auth.name = sess.name; auth.cid = null;
   cloudMode = "on";
-  if (auth.role === "investor") { state.viewer = String(sess.cid); state.tab = "overview"; }
-  else state.viewer = "fund";
+  state.viewer = "fund"; state.tab = "overview";
   const remote = await cloudLoad();
   if (remote && Array.isArray(remote.holdings)) {
     db = Object.assign(DEFAULTS(), remote); store();

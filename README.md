@@ -2,8 +2,10 @@
 
 An investor portal with real sign-in: live stock prices, holdings entered as ticker + shares, and performance shown as **current market value vs. principal invested**.
 
-- **You (admin)** sign in with the username `admin` — full access, edit everything; changes sync to all devices.
-- **Each investor** signs in with their email + a password you give them — read-only access. Investors see the fund, their own account, and every investor's performance (names, principals, values, gains — the shared table); other investors' emails are never sent to them, and only the admin can edit.
+There are exactly **two logins**:
+
+- **Admin** — username `admin` + your `ADMIN_PASSWORD`. Full access; edits sync to all devices.
+- **Investors** — username `investor` + the shared `INVESTOR_PASSWORD` you give your clients. Read-only: they see the fund, every investor's performance, and can browse each account view; they can't change anything, and investor emails are never sent to them.
 
 ## Deploy (GitHub → Vercel, ~5 minutes)
 
@@ -13,8 +15,8 @@ An investor portal with real sign-in: live stock prices, holdings entered as tic
 2. **Import to Vercel.**
    At [vercel.com](https://vercel.com): **Add New → Project** → import the repo → leave settings as-is → **Deploy**.
 
-3. **Set your admin password.**
-   Project → **Settings → Environment Variables** → add `ADMIN_PASSWORD` with a strong password of your choosing (apply to all environments).
+3. **Set the two passwords.**
+   Project → **Settings → Environment Variables** → add `ADMIN_PASSWORD` (yours) and `INVESTOR_PASSWORD` (shared by all investors) — strong, different passwords, applied to all environments.
 
 4. **Create the storage.**
    Project → **Storage** tab → **Create Database → Blob** → create and **Connect** to this project (adds `BLOB_READ_WRITE_TOKEN` automatically). If asked to choose an access mode, **Private** is recommended (both work — the app auto-detects).
@@ -26,10 +28,10 @@ Open the site. Until steps 3–5 are done it shows a setup checklist; after that
 
 ## Using it
 
-- **Sign in as admin** — email field: `admin`, password: your `ADMIN_PASSWORD`.
-- **Admin tab** — positions (ticker + shares), cash, investors and contributions, fund name (Settings).
-- **Give investors access** — Admin → Investors → **Set password** next to a name. A password is generated and shown **once**; send it to the investor with the site URL. They sign in with their email. New investors get a password generated automatically when added.
-- **Viewer menu** — as admin, switch between the whole fund and any investor's view.
+- **Sign in as admin** — username `admin`, password: your `ADMIN_PASSWORD`.
+- **Admin tab** — positions (ticker + shares), cash, investors and contributions, fund name and YTD (Settings).
+- **Give investors access** — send them the site URL + username `investor` + the shared `INVESTOR_PASSWORD`. To change it later, update the env var in Vercel and redeploy.
+- **Viewer menu** — everyone can switch between the whole fund and any investor's view; only the admin can edit.
 - Sessions last 7 days; **Sign out** is in the top bar.
 - **Local preview** — double-clicking `index.html` runs an open, browser-only mode with no accounts (for trying the UI). Accounts only exist on the deployed site.
 
@@ -49,8 +51,8 @@ Quotes come from the site's `/api/quote` endpoint (server-side Yahoo Finance, de
 
 ## Security notes
 
-- Passwords are hashed (scrypt) and stored separately from portfolio data; sessions are signed, httpOnly, secure cookies. Investor sessions are read-only and never receive other investors' emails; note that investors DO see each other's names and performance figures by design.
+- Both passwords live only in Vercel environment variables (never in the data store); sessions are signed, httpOnly, secure cookies lasting 7 days. Investor sessions are read-only and never receive investor emails; note that investors DO see each other's names and performance figures by design, and the shared login means investors are not individually identified.
 - Optional: add a `SESSION_SECRET` env var (any long random string). Without it, sessions are keyed off the Blob token and everyone is signed out if you recreate the store.
 - Suitable for a small fund sharing statements with clients. For production-grade needs (2FA, audit logs, rate limiting, password self-reset, compliance review), treat this as the starting point, not the finish line.
-- Investor values are time-aware and automatic: each contribution is indexed to the fund's market-value history from the month it was invested (using price history of current holdings), then normalized so all investors sum exactly to live market value. Earlier money shows bigger gains; new money starts near 0%. If the portfolio changed a lot over time, the history is an approximation. The fund-level YTD figure is entered manually in Settings (e.g. from IBKR) — never computed.
+- Ownership is pro-rata to principal invested (contribution dates don't affect it): current value = share of principal × live market value, gain = current value − principal. A consequence of this formula is that every investor shows the fund's overall gain percentage. The fund-level YTD figure is entered manually in Settings (e.g. from IBKR) — never computed.
 - Remaining limits: last write wins if two admins edit simultaneously; quotes are delayed and unofficial.

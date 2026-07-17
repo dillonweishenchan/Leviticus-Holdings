@@ -1,12 +1,9 @@
-// Sign-in, sign-out, session status, and investor password management.
-// Admin signs in with username "admin" + the ADMIN_PASSWORD env var.
-// Investor password hashes live in a separate blob (portal-auth.json),
-// so they can never be read or overwritten through /api/state.
+// Sign-in, sign-out and session status. Exactly two logins:
+//   username "admin"    + ADMIN_PASSWORD env var    -> full access
+//   username "investor" + INVESTOR_PASSWORD env var -> read-only, shared by all investors
 import {
   readSession, sign, sessionCookie, clearCookie,
-  hashPassword, verifyPassword, safeEqual,
-  readBlobJSON, writeBlobJSON, readBody, secretKey,
-  STATE_PATH, AUTH_PATH
+  safeEqual, readBody, secretKey
 } from "../lib/auth.js";
 
 const WEEK_S = 7 * 24 * 3600;
@@ -15,7 +12,8 @@ export default async function handler(req, res) {
   const flags = {
     api: true,
     blob: !!process.env.BLOB_READ_WRITE_TOKEN,
-    admin: !!process.env.ADMIN_PASSWORD
+    admin: !!process.env.ADMIN_PASSWORD,
+    investor: !!process.env.INVESTOR_PASSWORD
   };
   res.setHeader("Cache-Control", "no-store");
 
@@ -26,7 +24,7 @@ export default async function handler(req, res) {
       authed: !!s,
       role: s ? s.role : null,
       name: s ? s.name : null,
-      cid: s ? s.cid : null
+      cid: null
     });
   }
 
@@ -47,53 +45,34 @@ export default async function handler(req, res) {
     return res.status(501).json({ error: "not-configured", ...flags });
   }
 
-  try {
-    if (action === "login") {
-      const email = String(body.email || "").trim().toLowerCase();
-      const pw = String(body.password || "");
-      if (!email || !pw) return res.status(400).json({ error: "missing-fields" });
+  if (action === "login") {
+    const user = String(body.email || "").trim().toLowerCase();
+    const pw = String(body.password || "");
+    if (!user || !pw) return res.status(400).json({ error: "missing-fields" });
 
-      if (email === "admin") {
-        if (!safeEqual(pw, process.env.ADMIN_PASSWORD)) {
-          return res.status(401).json({ error: "bad-credentials" });
-        }
-        const tok = sign({ role: "admin", name: "Fund Admin", cid: null, exp: Date.now() + WEEK_S * 1000 });
-        res.setHeader("Set-Cookie", sessionCookie(tok, WEEK_S));
-        return res.status(200).json({ ok: true, role: "admin", name: "Fund Admin", cid: null });
+    if (user === "admin") {
+      if (!safeEqual(pw, process.env.ADMIN_PASSWORD)) {
+        return res.status(401).json({ error: "bad-credentials" });
       }
-
-      const state = await readBlobJSON(STATE_PATH);
-      const c = state && Array.isArray(state.clients)
-        ? state.clients.find(x => String(x.email || "").toLowerCase() === email)
-        : null;
-      if (!c) return res.status(401).json({ error: "bad-credentials" });
-
-      const auth = (await readBlobJSON(AUTH_PATH)) || { clients: {} };
-      const stored = auth.clients ? auth.clients[String(c.id)] : null;
-      if (!stored) return res.status(401).json({ error: "no-password" });
-      if (!verifyPassword(pw, stored)) return res.status(401).json({ error: "bad-credentials" });
-
-      const tok = sign({ role: "investor", name: c.name, cid: c.id, exp: Date.now() + WEEK_S * 1000 });
+      const tok = sign({ role: "admin", name: "Fund Admin", cid: null, exp: Date.now() + WEEK_S * 1000 });
       res.setHeader("Set-Cookie", sessionCookie(tok, WEEK_S));
-      return res.status(200).json({ ok: true, role: "investor", name: c.name, cid: c.id });
+      return res.status(200).json({ ok: true, role: "admin", name: "Fund Admin", cid: null });
     }
 
-    if (action === "set-password") {
-      const s = readSession(req);
-      if (!s || s.role !== "admin") return res.status(401).json({ error: "unauthorized" });
-      const cid = String(body.cid || "");
-      const pw = String(body.password || "");
-      if (!cid) return res.status(400).json({ error: "missing-cid" });
-      if (pw.length < 6) return res.status(400).json({ error: "weak-password" });
-      const auth = (await readBlobJSON(AUTH_PATH)) || { clients: {} };
-      if (!auth.clients) auth.clients = {};
-      auth.clients[cid] = hashPassword(pw);
-      await writeBlobJSON(AUTH_PATH, auth);
-      return res.status(200).json({ ok: true });
+    if (user === "investor") {
+      if (!process.env.INVESTOR_PASSWORD) {
+        return res.status(401).json({ error: "investor-login-not-configured" });
+      }
+      if (!safeEqual(pw, process.env.INVESTOR_PASSWORD)) {
+        return res.status(401).json({ error: "bad-credentials" });
+      }
+      const tok = sign({ role: "investor", name: "Investor", cid: null, exp: Date.now() + WEEK_S * 1000 });
+      res.setHeader("Set-Cookie", sessionCookie(tok, WEEK_S));
+      return res.status(200).json({ ok: true, role: "investor", name: "Investor", cid: null });
     }
 
-    return res.status(400).json({ error: "unknown-action" });
-  } catch (e) {
-    return res.status(500).json({ error: "auth-error", detail: String(e && e.message || e) });
+    return res.status(401).json({ error: "bad-credentials" });
   }
+
+  return res.status(400).json({ error: "unknown-action" });
 }
