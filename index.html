@@ -328,7 +328,10 @@ function parseYahoo(j) {
       if (last && last.ym === ym) last.close = c; else hist.push({ ym, close: c });
     }
   });
-  return { price: m.regularMarketPrice, prev: m.chartPreviousClose || m.previousClose || null,
+  // Previous trading day's close only — chartPreviousClose refers to the
+  // close before the requested 2y range, which is NOT "yesterday".
+  return { price: m.regularMarketPrice,
+           prev: m.regularMarketPreviousClose > 0 ? m.regularMarketPreviousClose : null,
            name: m.shortName || m.longName || null, hist };
 }
 function parseFinnhub(j) {

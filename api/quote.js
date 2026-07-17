@@ -25,9 +25,12 @@ function parseChart(j) {
       if (last && last.ym === ym) last.close = c; else hist.push({ ym, close: c });
     }
   });
+  // "Today" change must compare against the previous trading day's close.
+  // NOTE: chartPreviousClose is the close before the requested RANGE (2 years
+  // ago here) — using it showed multi-year moves as daily changes.
   return {
     price: m.regularMarketPrice,
-    prev: m.chartPreviousClose || m.previousClose || null,
+    prev: m.regularMarketPreviousClose > 0 ? m.regularMarketPreviousClose : null,
     name: m.shortName || m.longName || null,
     hist
   };
