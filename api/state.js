@@ -1,29 +1,9 @@
 // Shared portfolio state (Vercel Blob). Server-enforced access:
 //   - admin sessions:    full state, read + write
-//   - investor sessions: read-only, filtered to their own account
-//     (other investors' identities and amounts are never sent)
+//   - investor sessions: read-only; they see every investor's name,
+//     contributions and performance (the manager's choice), but other
+//     investors' emails are never sent and writes are rejected.
 import { readSession, readBlobJSON, writeBlobJSON, readBody, STATE_PATH } from "../lib/auth.js";
-
-// Aggregate cumulative principal by month (no identities) so investor
-// charts can show their ownership share over time without leaking data.
-function tpSeriesOf(state) {
-  const events = [];
-  for (const c of state.clients || []) {
-    for (const k of c.contributions || []) {
-      if (k && k.ym && k.amount > 0) events.push({ ym: k.ym, amount: k.amount });
-    }
-  }
-  events.sort((a, b) => (a.ym < b.ym ? -1 : 1));
-  const out = [];
-  let run = 0;
-  for (const e of events) {
-    run += e.amount;
-    const last = out[out.length - 1];
-    if (last && last.ym === e.ym) last.total = run;
-    else out.push({ ym: e.ym, total: run });
-  }
-  return out;
-}
 
 export default async function handler(req, res) {
   if (!process.env.BLOB_READ_WRITE_TOKEN || !process.env.ADMIN_PASSWORD) {
@@ -53,8 +33,12 @@ export default async function handler(req, res) {
         ytd: state.ytd ?? null, // manager-reported YTD figure
         holdings: state.holdings,
         quotes: state.quotes,
-        clients: [me],
-        tpSeries: tpSeriesOf(state),
+        clients: (state.clients || []).map(x => ({
+          id: x.id,
+          name: x.name,
+          email: String(x.id) === String(s.cid) ? x.email : "", // emails stay private
+          contributions: x.contributions || []
+        })),
         investorMode: true
       };
       return res.status(200).json({ state: filtered });

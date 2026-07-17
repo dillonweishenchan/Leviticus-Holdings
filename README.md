@@ -3,7 +3,7 @@
 An investor portal with real sign-in: live stock prices, holdings entered as ticker + shares, and performance shown as **current market value vs. principal invested**.
 
 - **You (admin)** sign in with the username `admin` — full access, edit everything; changes sync to all devices.
-- **Each investor** signs in with their email + a password you give them — they see **only their own account** (enforced by the server, not just hidden in the page).
+- **Each investor** signs in with their email + a password you give them — read-only access. Investors see the fund, their own account, and every investor's performance (names, principals, values, gains — the shared table); other investors' emails are never sent to them, and only the admin can edit.
 
 ## Deploy (GitHub → Vercel, ~5 minutes)
 
@@ -49,8 +49,8 @@ Quotes come from the site's `/api/quote` endpoint (server-side Yahoo Finance, de
 
 ## Security notes
 
-- Passwords are hashed (scrypt) and stored separately from portfolio data; sessions are signed, httpOnly, secure cookies. Investors' API responses never include other investors' names or amounts.
+- Passwords are hashed (scrypt) and stored separately from portfolio data; sessions are signed, httpOnly, secure cookies. Investor sessions are read-only and never receive other investors' emails; note that investors DO see each other's names and performance figures by design.
 - Optional: add a `SESSION_SECRET` env var (any long random string). Without it, sessions are keyed off the Blob token and everyone is signed out if you recreate the store.
 - Suitable for a small fund sharing statements with clients. For production-grade needs (2FA, audit logs, rate limiting, password self-reset, compliance review), treat this as the starting point, not the finish line.
-- Ownership is pro-rata to principal invested: each investor's current value is their share of the fund's market value, so all investors show the fund's overall gain percentage regardless of entry timing. The fund's YTD figure is entered manually in Settings (e.g. from your IBKR statement) — never computed.
+- Investor values are time-aware and automatic: each contribution is indexed to the fund's market-value history from the month it was invested (using price history of current holdings), then normalized so all investors sum exactly to live market value. Earlier money shows bigger gains; new money starts near 0%. If the portfolio changed a lot over time, the history is an approximation. The fund-level YTD figure is entered manually in Settings (e.g. from IBKR) — never computed.
 - Remaining limits: last write wins if two admins edit simultaneously; quotes are delayed and unofficial.
