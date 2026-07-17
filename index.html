@@ -165,6 +165,7 @@
   .tbl-input:hover { border-color: var(--line); background: #fcfbf9; }
   .tbl-input:focus { border-color: var(--gold); background: #fff; outline: none; }
   .tbl-input.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .tbl-edit { border-color: var(--line); background: #fcfbf9; } /* always looks editable */
   .del-btn { background: none; border: none; color: #b9b2a3; cursor: pointer; font-size: 16px; padding: 2px 6px; border-radius: 5px; }
   .del-btn:hover { color: var(--red); background: #faeceb; }
   .link-btn { background: none; border: none; color: var(--gold); cursor: pointer; font-size: 13px; font-weight: 600; padding: 0; }
@@ -844,8 +845,8 @@ function adminView() {
       const open = String(state.editInv) === String(c.id);
       return `
       <tr><td>
-        <input class="tbl-input" value="${esc(c.name)}" onchange="app.editClient(${c.id},'name',this.value)">
-        <input class="tbl-input" style="font-size:12px;color:var(--muted)" value="${esc(c.email)}" onchange="app.editClient(${c.id},'email',this.value)">
+        <input class="tbl-input tbl-edit" value="${esc(c.name)}" onchange="app.editClient(${c.id},'name',this.value)" title="Investor name — click to edit">
+        <input class="tbl-input tbl-edit" style="font-size:12.5px;margin-top:4px" value="${esc(c.email)}" onchange="app.editClient(${c.id},'email',this.value)" title="Sign-in email — click to edit">
       </td>
       <td class="num">${fmtMoney(st.principal)}</td>
       <td class="num">${(st.frac*100).toFixed(1)}%</td>
@@ -859,6 +860,13 @@ function adminView() {
       </td></tr>
       ${open ? `
       <tr><td colspan="6" style="background:#faf9f5;padding:14px 16px">
+        <b style="font-size:13px;color:var(--navy)">Investor details</b>
+        <div class="inline-form" style="margin:10px 0 16px">
+          <div class="field" style="max-width:240px"><label>NAME</label>
+            <input value="${esc(c.name)}" onchange="app.editClient(${c.id},'name',this.value)"></div>
+          <div class="field" style="max-width:300px"><label>EMAIL (USED TO SIGN IN)</label>
+            <input value="${esc(c.email)}" onchange="app.editClient(${c.id},'email',this.value)"></div>
+        </div>
         <b style="font-size:13px;color:var(--navy)">Contributions — ${esc(c.name)}</b>
         <table style="margin-top:8px;max-width:540px">
           <thead><tr><th style="width:170px">Month (YYYY-MM)</th><th class="num">Amount (USD)</th><th style="width:36px"></th></tr></thead>
@@ -876,7 +884,8 @@ function adminView() {
       </td></tr>` : ""}`;
     }).join("")}
     </tbody></table>
-    <div class="hint" style="margin-top:8px;margin-bottom:0">Names and emails are editable in place. <b>Edit contributions</b> adjusts amounts and dates. <b>Set password</b> generates a sign-in password for that investor (shown once — send it to them with the site link).</div>
+    <div class="flash" id="inv-edit-flash"></div>
+    <div class="hint" style="margin-top:4px;margin-bottom:0">Names and emails are editable in place — click, type, and press Tab or Enter to save. <b>Edit</b> opens details and contributions. <b>Set password</b> generates a sign-in password for that investor (shown once — send it to them with the site link).</div>
 
     <h3 style="margin-top:22px">Add investor / contribution</h3>
     <div class="hint">Use an existing email to record an additional contribution.</div>
@@ -949,7 +958,7 @@ window.app = {
     const c = db.clients.find(x => String(x.id) === String(cid));
     if (!c) return;
     if (auth.mode !== "in" || auth.role !== "admin") {
-      flash("inv-flash", "Investor passwords can only be set on the deployed, signed-in site.", true); return;
+      flash("inv-edit-flash", "Investor passwords can only be set on the deployed, signed-in site.", true); return;
     }
     const pw = genPw();
     try {
@@ -959,8 +968,8 @@ window.app = {
       });
       if (r.status === 401) return sessionExpired();
       if (!r.ok) throw new Error("http " + r.status);
-      flashHTML("inv-flash", "Password for <b>" + esc(c.name) + "</b>: <b style=\"font-size:15px\">" + esc(pw) + "</b> — copy it now, it won't be shown again.");
-    } catch (e) { flash("inv-flash", "Could not set the password — try again.", true); }
+      flashHTML("inv-edit-flash", "Password for <b>" + esc(c.name) + "</b>: <b style=\"font-size:15px\">" + esc(pw) + "</b> — copy it now, it won't be shown again.");
+    } catch (e) { flash("inv-edit-flash", "Could not set the password — try again.", true); }
   },
 
   editFund(k, v) {
@@ -1012,10 +1021,10 @@ window.app = {
     val = String(val).trim();
     if (key === "email") {
       val = val.toLowerCase();
-      if (!val.includes("@")) { flash("inv-flash", "Enter a valid email.", true); render(); return; }
-      if (db.clients.some(x => x.id !== c.id && x.email === val)) { flash("inv-flash", "That email is already used by another investor.", true); render(); return; }
+      if (!val.includes("@")) { flash("inv-edit-flash", "Enter a valid email.", true); render(); return; }
+      if (db.clients.some(x => x.id !== c.id && x.email === val)) { flash("inv-edit-flash", "That email is already used by another investor.", true); render(); return; }
       c.email = val;
-      flash("inv-flash", c.name + " now signs in as " + val + " (same password).");
+      flash("inv-edit-flash", c.name + " now signs in as " + val + " (same password).");
     } else if (key === "name") {
       if (!val) { render(); return; }
       c.name = val;
@@ -1027,11 +1036,11 @@ window.app = {
     if (!c || !c.contributions[j]) return;
     if (key === "ym") {
       val = String(val).trim();
-      if (!validYm(val)) { flash("inv-flash", "Enter the month as YYYY-MM (e.g. 2026-07).", true); render(); return; }
+      if (!validYm(val)) { flash("inv-edit-flash", "Enter the month as YYYY-MM (e.g. 2026-07).", true); render(); return; }
       c.contributions[j].ym = val;
     } else {
       const n = parseFloat(val);
-      if (!(n > 0)) { flash("inv-flash", "Enter an amount above zero.", true); render(); return; }
+      if (!(n > 0)) { flash("inv-edit-flash", "Enter an amount above zero.", true); render(); return; }
       c.contributions[j].amount = n;
     }
     storeAndSync(); render();
