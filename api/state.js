@@ -74,6 +74,10 @@ export default async function handler(req, res) {
     res.setHeader("Allow", "GET, PUT, POST");
     return res.status(405).json({ error: "method-not-allowed" });
   } catch (e) {
-    return res.status(500).json({ error: "storage-error", detail: String(e && e.message || e) });
+    return res.status(500).json({
+      error: "storage-error",
+      detail: String(e && e.message || e).slice(0, 300),
+      hint: "In Vercel: Storage tab -> the Blob store must show as Connected to this project. If you deleted/recreated the store, reconnect it, then redeploy (the old token stays in env vars until a redeploy)."
+    });
   }
 }

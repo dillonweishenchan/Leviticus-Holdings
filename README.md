@@ -37,6 +37,16 @@ Open the site. Until steps 3–5 are done it shows a setup checklist; after that
 
 Quotes come from the site's `/api/quote` endpoint (server-side Yahoo Finance, delayed public data, cached ~60s, auto-refresh every 5 min, sign-in required). If unavailable, the page falls back to public quote routes, an optional free [finnhub.io](https://finnhub.io) key (Settings), then last-known prices — always labeled live/fallback.
 
+## Troubleshooting
+
+**"SYNC ERROR (storage-error: …)"** — the server can't write to Blob storage. The text after the colon says why; the usual causes:
+
+1. **Store not connected.** Vercel project → **Storage** tab → the Blob store must show **Connected** to this project. If it isn't, connect it.
+2. **Stale token.** If you ever deleted/recreated the store, the old `BLOB_READ_WRITE_TOKEN` lingers. Disconnect and reconnect the store (or delete the env var and reconnect), then **redeploy** — env changes only apply on redeploy.
+3. Check the function logs: Vercel → project → **Logs** → filter `/api/state` for the full error.
+
+**Setup checklist appears instead of sign-in** — `ADMIN_PASSWORD` or the Blob store is missing from the *running* deployment; add it and redeploy.
+
 ## Security notes
 
 - Passwords are hashed (scrypt) and stored separately from portfolio data; sessions are signed, httpOnly, secure cookies. Investors' API responses never include other investors' names or amounts.

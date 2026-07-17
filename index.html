@@ -267,7 +267,8 @@ async function cloudSave() {
     else if (r.status === 401) sessionExpired();
     else {
       const j = await r.json().catch(() => ({}));
-      state.syncErr = "SYNC ERROR (" + (j.error || "HTTP " + r.status) + ") — recent edits have NOT reached other devices; retrying…";
+      const why = (j.error || "HTTP " + r.status) + (j.detail ? ": " + String(j.detail).slice(0, 160) : "");
+      state.syncErr = "SYNC ERROR (" + why + ") — recent edits have NOT reached other devices; retrying…";
       updateBanner();
     }
   } catch (e) {
