@@ -942,13 +942,14 @@ function adminView() {
     <div class="hint" style="margin-top:6px">Any contribution adds that amount to the fund's cash balance (new money enters as cash). Deploy it into positions afterwards and lower the cash balance to match.</div>
 
     <h3 style="margin-top:22px">Withdraw funds</h3>
-    <div class="hint">Records a redemption: the investor's units are sold at the current unit price (${fmtPrice(unitPrice())}) and the amount leaves the fund's cash. Their gain % is preserved on the remaining balance.</div>
+    <div class="hint">Records a redemption: units are sold at the exit price and the amount leaves the fund's cash. Exit price defaults to the current unit price (${fmtPrice(unitPrice())}); override it for a backdated withdrawal. Their gain % is preserved on the remaining balance.</div>
     ${db.clients.length ? `
     <div class="inline-form">
       <div class="field"><label>INVESTOR</label>
-        <select id="wd-sel">${db.clients.map(c => { const v = clientStats(c).value; return `<option value="${c.id}">${esc(c.name)} — ${fmtMoney(v)} available</option>`; }).join("")}</select></div>
+        <select id="wd-sel">${db.clients.map(c => { const s = clientStats(c); return `<option value="${c.id}">${esc(c.name)} — ${fmtMoney(s.value)} available (${unitsOf(c).toLocaleString(undefined,{maximumFractionDigits:2})} units)</option>`; }).join("")}</select></div>
       <div class="field"><label>AMOUNT (USD)</label><input id="wd-amt" type="number" step="1000" placeholder="50000"></div>
       <div class="field"><label>MONTH (YYYY-MM)</label><input id="wd-ym" value="${nowYm()}"></div>
+      <div class="field"><label>EXIT $/UNIT</label><input id="wd-price" type="number" step="0.0001" value="${unitPrice().toFixed(4)}"></div>
       <button class="btn btn-ghost" style="width:auto" onclick="app.withdraw()">Withdraw</button>
     </div>
     <div class="flash" id="wd-flash"></div>` : `<div class="hint">No investors yet.</div>`}
@@ -1083,13 +1084,20 @@ window.app = {
     if (!c) { flash("wd-flash", "Pick an investor.", true); return; }
     const amt = parseFloat($("wd-amt").value);
     const ym = $("wd-ym").value.trim();
+    let xprice = parseFloat($("wd-price") ? $("wd-price").value : "");
+    if (!(xprice > 0)) xprice = unitPrice();
     if (!validYm(ym)) { flash("wd-flash", "Enter month as YYYY-MM.", true); return; }
     if (!(amt > 0)) { flash("wd-flash", "Enter a valid amount.", true); return; }
-    const cur = clientStats(c).value;
-    if (amt > cur + 0.005) { flash("wd-flash", "Can't withdraw more than " + fmtMoney(cur) + " (their current value).", true); return; }
-    const frac = cur > 0 ? amt / cur : 0;
+    const held = unitsOf(c);
+    const unitsOut = amt / xprice;               // units redeemed at the exit price
+    const maxAmt = held * xprice;                // most they can take out at that price
+    if (unitsOut > held * 1.000001) {
+      flash("wd-flash", "At " + fmtPrice(xprice) + "/unit the most " + c.name + " can withdraw is " + fmtMoney(maxAmt) + " (" + held.toLocaleString(undefined,{maximumFractionDigits:2}) + " units).", true);
+      return;
+    }
+    const frac = held > 0 ? unitsOut / held : 0;
     // Redeem units pro-rata: scale each contribution's units and cost basis down
-    // by the withdrawn fraction. Entry prices and gain % are preserved.
+    // by the redeemed fraction. Entry prices and gain % are preserved.
     const full = frac >= 0.9999;
     if (full) {
       c.contributions = [{ ym, amount: 0, units: 0 }];
@@ -1098,7 +1106,8 @@ window.app = {
     }
     db.cash = (db.cash || 0) - amt; // cash paid out of the fund
     storeAndSync(); render();
-    flash("wd-flash", fmtMoney(amt) + " withdrawn for " + c.name + (full ? " (position closed)" : "") + "; fund cash −" + fmtMoney(amt) + ".");
+    flash("wd-flash", fmtMoney(amt) + " withdrawn for " + c.name + " at " + fmtPrice(xprice) + "/unit (" +
+      unitsOut.toLocaleString(undefined,{maximumFractionDigits:2}) + " units redeemed)" + (full ? " — position closed" : "") + "; fund cash −" + fmtMoney(amt) + ".");
   },
   delClient(id) { db.clients = db.clients.filter(c => c.id !== id); if (String(state.viewer) === String(id)) state.viewer = "fund"; storeAndSync(); render(); },
   toggleContrib(id) { state.editInv = String(state.editInv) === String(id) ? null : id; render(); },
