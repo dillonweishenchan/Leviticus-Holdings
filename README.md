@@ -29,7 +29,9 @@ Open the site. Until steps 3–5 are done it shows a setup checklist; after that
 ## Using it
 
 - **Sign in as admin** — username `admin`, password: your `ADMIN_PASSWORD`.
-- **Admin tab** — positions (ticker + shares), cash, add investors, add contributions, withdraw funds, fund name and YTD (Settings). Adding a contribution raises the fund's cash by that amount; a withdrawal lowers it (units are redeemed at the current unit price, and the investor's gain % is preserved on the remaining balance).
+- **Admin tab** — positions (ticker + shares), cash, add investors, add contributions, withdraw funds, annual returns vs the S&P 500, fund name and YTD (Settings).
+- **Portfolio vs S&P 500 chart** — driven entirely by the yearly figures you type in Admin → Annual returns. Nothing is computed or fetched for it.
+- **Withdrawals** — figures shown are net of withdrawals: redeeming units reduces both principal and current value, so Total gain reflects the position still held, not profit already taken out. A disclaimer to this effect appears under the performance tables. Adding a contribution raises the fund's cash by that amount; a withdrawal lowers it (units are redeemed at the current unit price, and the investor's gain % is preserved on the remaining balance).
 - **Give investors access** — send them the site URL + username `investor` + the shared `INVESTOR_PASSWORD`. To change it later, update the env var in Vercel and redeploy.
 - **Viewer menu** — everyone can switch between the whole fund and any investor's view; only the admin can edit.
 - Sessions last 7 days; **Sign out** is in the top bar.

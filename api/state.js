@@ -28,7 +28,8 @@ export default async function handler(req, res) {
         at: state.at || 0,
         fund: state.fund,
         cash: state.cash,
-        ytd: state.ytd ?? null, // manager-reported YTD figure
+        ytd: state.ytd ?? null,          // manager-reported YTD figure
+        annual: state.annual || [],      // manager-entered yearly returns vs S&P 500
         holdings: state.holdings,
         quotes: state.quotes,
         clients: (state.clients || []).map(x => ({

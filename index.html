@@ -133,6 +133,7 @@
   .chart-legend span { display: inline-flex; align-items: center; gap: 7px; }
   .cl-line { width: 20px; height: 3px; border-radius: 2px; background: var(--gold); display: inline-block; }
   .cl-dash { width: 20px; height: 0; border-top: 2.5px dashed var(--navy); display: inline-block; }
+  .sw-box { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
 
   table { width: 100%; border-collapse: collapse; font-size: 14px; }
   th { text-align: left; font-size: 11.5px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); font-weight: 700; padding: 8px 10px; border-bottom: 2px solid var(--line); }
@@ -190,6 +191,9 @@
    ===================================================== */
 const STORE_KEY = "fund-portal-v3";
 const ASSET_CLASSES = ["US Equity","International Equity","Fixed Income","Alternatives","Cash"];
+const WITHDRAWAL_NOTE = "<b>Note on withdrawals:</b> these figures are net of any funds already withdrawn. " +
+  "A withdrawal redeems units and reduces both principal and current value, so <b>Total gain</b> reflects the position still held — " +
+  "profit taken out in past withdrawals is not included in the gain shown.";
 
 const DEFAULTS = () => ({
   at: 0, // last-edit timestamp, used for cross-device sync
@@ -197,6 +201,7 @@ const DEFAULTS = () => ({
   cash: 400000,
   key: "", // optional Finnhub API key (extra quote source)
   ytd: null, // YTD return in %, entered by the manager in Settings (null = show —)
+  annual: [], // yearly returns entered by the manager: [{ y: 2025, p: 12.4, s: 24.2 }]
   holdings: [
     { t:"SPY",   name:"SPDR S&P 500 ETF",         cls:"US Equity",            sh:3000, fb:560 },
     { t:"AAPL",  name:"Apple Inc.",                cls:"US Equity",            sh:4000, fb:210 },
@@ -472,33 +477,6 @@ function clientStats(c) {
   const firstYm = c.contributions.length ? c.contributions.map(k => k.ym).sort()[0] : null;
   return { principal, frac, value, gain, gainPct: principal ? gain / principal : 0, firstYm };
 }
-function histClose(t, ym) {
-  const q = quote(t);
-  if (!q || !q.hist) return null;
-  let best = null;
-  for (const p of q.hist) { if (p.ym <= ym) best = p.close; else break; }
-  return best;
-}
-function fundSeries() {
-  const yms = new Set();
-  for (const t of uniqueTickers()) { const q = quote(t); if (q && q.hist) q.hist.forEach(p => yms.add(p.ym)); }
-  const months = [...yms].sort();
-  const cur = nowYm();
-  if (!months.includes(cur)) months.push(cur);
-  return months.map(ym => {
-    let v = db.cash || 0;
-    for (const h of db.holdings) {
-      const p = (ym === cur ? priceOf(h) : (histClose(h.t, ym) ?? priceOf(h)));
-      v += h.sh * p;
-    }
-    return { ym, label: monthLabel(ym), value: v, principal: totalPrincipal(ym) };
-  });
-}
-function clientSeries(c) {
-  return fundSeries()
-    .map(p => ({ ym: p.ym, label: p.label, value: fracOf(c, p.ym) * p.value, principal: principalOf(c, p.ym) }))
-    .filter(p => p.principal > 0);
-}
 function classBreakdown() {
   const m = {};
   for (const h of db.holdings) m[h.cls] = (m[h.cls] || 0) + h.sh * priceOf(h);
@@ -524,80 +502,59 @@ function holdingBreakdown() {
 const DONUT_COLORS = ["#10283f","#b08d4a","#5b7f71","#8496a8","#c2703e","#4e6e8e","#9a7b5f","#6b8e23","#7a5c72","#cfc6b2"];
 const CH = { W: 920, H: 300, padL: 74, padR: 20, padT: 18, padB: 34 };
 
-function chartScales(series) {
-  const vals = series.map(p => p.value).concat(series.map(p => p.principal));
-  let min = Math.min(...vals), max = Math.max(...vals);
-  const span = (max - min) || Math.abs(max) || 1;
-  min -= span * .08; max += span * .08;
-  const X = (i) => CH.padL + (CH.W - CH.padL - CH.padR) * (series.length === 1 ? .5 : i / (series.length - 1));
-  const Y = (v) => CH.padT + (CH.H - CH.padT - CH.padB) * (1 - (v - min) / (max - min));
-  return { X, Y, min, max };
+/* Annual returns: portfolio vs S&P 500 (values entered by the manager) */
+function annualRows() {
+  return (db.annual || [])
+    .filter(r => r && r.y)
+    .slice()
+    .sort((a,b) => a.y - b.y);
 }
-function areaChartHTML(series, id) {
-  if (series.length < 2) return "<p class='hint'>Performance history will appear once live prices load.</p>";
-  const { X, Y, min, max } = chartScales(series);
-  let line = "", step = "";
-  series.forEach((p,i) => { line += (i ? "L" : "M") + X(i).toFixed(1) + " " + Y(p.value).toFixed(1) + " "; });
-  series.forEach((p,i) => {
-    const x = X(i).toFixed(1), y = Y(p.principal).toFixed(1);
-    step += i === 0 ? "M" + x + " " + y + " " : "H" + x + " V" + y + " ";
-  });
-  const area = line + "L" + X(series.length-1).toFixed(1) + " " + (CH.H-CH.padB) + " L" + CH.padL + " " + (CH.H-CH.padB) + " Z";
+function barCompareHTML(rows) {
+  if (!rows.length) {
+    return `<p class='hint'>No annual returns entered yet${isAdminUI() ? " — add them in the <b>Annual returns</b> section of the Admin tab." : "."}</p>`;
+  }
+  const W = 920, H = 320, padL = 60, padR = 20, padT = 18, padB = 46;
+  const vals = [];
+  rows.forEach(r => { if (r.p != null) vals.push(r.p); if (r.s != null) vals.push(r.s); });
+  let min = Math.min(0, ...vals), max = Math.max(0, ...vals);
+  const span = (max - min) || 1;
+  min -= span * .12; max += span * .12;
+  const Y = (v) => padT + (H - padT - padB) * (1 - (v - min) / (max - min));
+  const bandW = (W - padL - padR) / rows.length;
+  const barW = Math.min(46, bandW * 0.32);
+  const zero = Y(0);
   let grid = "";
   for (let g = 0; g <= 4; g++) {
     const v = min + (max - min) * g / 4, y = Y(v).toFixed(1);
-    grid += `<line x1="${CH.padL}" y1="${y}" x2="${CH.W-CH.padR}" y2="${y}" stroke="#eceadf" stroke-width="1"/>`
-          + `<text x="${CH.padL-10}" y="${+y+4}" text-anchor="end" font-size="11.5" fill="#8a96a3">${fmtMoneyC(v)}</text>`;
+    grid += `<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="#eceadf" stroke-width="1"/>`
+          + `<text x="${padL-10}" y="${+y+4}" text-anchor="end" font-size="11.5" fill="#8a96a3">${v.toFixed(0)}%</text>`;
   }
-  let xlabels = "";
-  const stepN = Math.max(1, Math.ceil(series.length / 7));
-  series.forEach((p,i) => {
-    if (i % stepN === 0 || i === series.length-1)
-      xlabels += `<text x="${X(i).toFixed(1)}" y="${CH.H-10}" text-anchor="middle" font-size="11.5" fill="#8a96a3">${p.label}</text>`;
+  grid += `<line x1="${padL}" y1="${zero.toFixed(1)}" x2="${W-padR}" y2="${zero.toFixed(1)}" stroke="#c9c3b4" stroke-width="1.5"/>`;
+  let bars = "";
+  rows.forEach((r,i) => {
+    const cx = padL + bandW * (i + 0.5);
+    const pair = [
+      { v: r.p, color: "#b08d4a", dx: -barW * 0.55 },
+      { v: r.s, color: "#10283f", dx:  barW * 0.55 }
+    ];
+    pair.forEach(b => {
+      if (b.v == null || isNaN(b.v)) return;
+      const y = Y(b.v), top = Math.min(y, zero), h = Math.max(1.5, Math.abs(zero - y));
+      bars += `<rect x="${(cx + b.dx - barW/2).toFixed(1)}" y="${top.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" rx="3" fill="${b.color}"/>`
+            + `<text x="${(cx + b.dx).toFixed(1)}" y="${(b.v >= 0 ? top - 5 : top + h + 13).toFixed(1)}" text-anchor="middle" font-size="11" font-weight="600" fill="${b.color}">${(b.v>0?"+":"") + b.v.toFixed(1)}%</text>`;
+    });
+    bars += `<text x="${cx.toFixed(1)}" y="${H-14}" text-anchor="middle" font-size="12.5" fill="#46586a" font-weight="600">${r.y}</text>`;
   });
   return `
-  <div class="chart-box" id="${id}-box">
-    <div class="chart-tip" id="${id}-tip"></div>
-    <svg id="${id}" viewBox="0 0 ${CH.W} ${CH.H}" style="width:100%;display:block">
-      <defs><linearGradient id="${id}-g" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#b08d4a" stop-opacity=".28"/>
-        <stop offset="100%" stop-color="#b08d4a" stop-opacity=".02"/>
-      </linearGradient></defs>
-      ${grid}
-      <path d="${area}" fill="url(#${id}-g)"/>
-      <path d="${step}" fill="none" stroke="#10283f" stroke-width="2" stroke-dasharray="5 4" opacity=".75"/>
-      <path d="${line}" fill="none" stroke="#b08d4a" stroke-width="2.5" stroke-linejoin="round"/>
-      <line id="${id}-cursor" x1="0" y1="${CH.padT}" x2="0" y2="${CH.H-CH.padB}" stroke="#10283f" stroke-width="1" stroke-dasharray="3 3" opacity="0"/>
-      <circle id="${id}-dot" r="4.5" fill="#10283f" stroke="#fff" stroke-width="2" opacity="0"/>
-      ${xlabels}
-      <rect x="${CH.padL}" y="${CH.padT}" width="${CH.W-CH.padL-CH.padR}" height="${CH.H-CH.padT-CH.padB}" fill="transparent" id="${id}-hover"/>
-    </svg>
+  <div class="chart-box">
+    <svg viewBox="0 0 ${W} ${H}" style="width:100%;display:block">${grid}${bars}</svg>
     <div class="chart-legend">
-      <span><span class="cl-line"></span>Market value</span>
-      <span><span class="cl-dash"></span>Principal invested</span>
+      <span><span class="sw-box" style="background:#b08d4a"></span>Portfolio</span>
+      <span><span class="sw-box" style="background:#10283f"></span>S&amp;P 500</span>
     </div>
   </div>`;
 }
-function wireAreaChart(id, series) {
-  const svg = $(id); if (!svg || series.length < 2) return;
-  const hover = $(id+"-hover"), tip = $(id+"-tip"), cur = $(id+"-cursor"), dot = $(id+"-dot"), box = $(id+"-box");
-  const { X, Y } = chartScales(series);
-  hover.addEventListener("mousemove", (e) => {
-    const r = svg.getBoundingClientRect();
-    const sx = (e.clientX - r.left) * (CH.W / r.width);
-    const i = Math.max(0, Math.min(series.length-1, Math.round((sx-CH.padL)/(CH.W-CH.padL-CH.padR)*(series.length-1))));
-    const p = series[i], x = X(i), y = Y(p.value);
-    cur.setAttribute("x1",x); cur.setAttribute("x2",x); cur.setAttribute("opacity",1);
-    dot.setAttribute("cx",x); dot.setAttribute("cy",y); dot.setAttribute("opacity",1);
-    tip.innerHTML = `<span class="t">${esc(p.label)}</span>${fmtMoney(p.value)} <span style="opacity:.65">vs ${fmtMoney(p.principal)} principal</span>`;
-    tip.style.display = "block";
-    tip.style.left = (x / CH.W * 100) + "%";
-    tip.style.top = (y / CH.H * box.clientHeight) + "px";
-  });
-  hover.addEventListener("mouseleave", () => {
-    tip.style.display = "none"; cur.setAttribute("opacity",0); dot.setAttribute("opacity",0);
-  });
-}
+
 function donutHTML(segs) {
   const R = 70, CX = 90, CY = 90, SW = 30, C = 2 * Math.PI * R;
   const total = segs.reduce((s,x) => s + x.value, 0) || 1;
@@ -702,7 +659,6 @@ function overviewView() {
   const c = currentClient();
   if (!c) {
     const gain = mv - tp, gp = tp ? gain/tp : 0;
-    const series = fundSeries();
     const ytd = manualYtd();
     return `
     <div class="page-head"><h2 class="serif">Fund overview</h2><span class="asof" id="px-status">${statusHTML()}</span></div>
@@ -713,19 +669,19 @@ function overviewView() {
       <div class="card"><div class="k">YTD</div><div class="v ${ytd==null?'':pctClass(ytd)}">${ytd==null?"—":fmtPct(ytd)}</div><div class="s">${ytd==null?"set in Admin → Settings":"as of " + new Date().toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</div></div>
     </div>
     <div class="panel">
-      <h3>Market value vs principal</h3>
-      <div class="hint">Monthly market value of current holdings (live price history) against cumulative investor principal</div>
-      ${areaChartHTML(series, "fchart")}
+      <h3>Portfolio vs S&amp;P 500</h3>
+      <div class="hint">Annual returns, as reported by the fund manager</div>
+      ${barCompareHTML(annualRows())}
     </div>
     <div class="panel">
       <h3>Investor performance</h3>
       <div class="hint">Each investor's position, marked to the latest prices</div>
       <table><thead><tr><th>Investor</th><th class="num">Principal</th><th class="num">Ownership</th><th class="num">Current value</th><th class="num">Gain ($)</th><th class="num">Gain (%)</th></tr></thead>
       <tbody>${db.clients.map(x => `<tr><td>${esc(x.name)}</td>${perfRowHTML(clientStats(x))}</tr>`).join("")}</tbody></table>
+      <div class="hint" style="margin:12px 0 0">${WITHDRAWAL_NOTE}</div>
     </div>`;
   }
   const st = clientStats(c);
-  const series = clientSeries(c);
   return `
   <div class="page-head">
     <h2 class="serif">${esc(c.name)} — account overview ${isAdminUI() ? `<button class="link-btn" style="font-size:14px;margin-left:10px" onclick="app.setViewer('fund')">← Back to fund view</button>` : ""}</h2>
@@ -738,15 +694,16 @@ function overviewView() {
     <div class="card"><div class="k">Fund market value</div><div class="v">${fmtMoney(mv)}</div><div class="s">marked to latest prices</div></div>
   </div>
   <div class="panel">
-    <h3>Account value vs principal</h3>
-    <div class="hint">This investor's share of the fund's market value against the capital they've invested</div>
-    ${areaChartHTML(series, "cchart")}
+    <h3>Portfolio vs S&amp;P 500</h3>
+    <div class="hint">Annual returns, as reported by the fund manager</div>
+    ${barCompareHTML(annualRows())}
   </div>
   <div class="panel">
     <h3>Investor performance</h3>
     <div class="hint">All investors, marked to the latest prices</div>
     <table><thead><tr><th>Investor</th><th class="num">Principal</th><th class="num">Ownership</th><th class="num">Current value</th><th class="num">Gain ($)</th><th class="num">Gain (%)</th></tr></thead>
     <tbody>${db.clients.map(x => `<tr><td>${esc(x.name)}${String(x.id)===String(c.id) ? ' <span class="pill" style="margin-left:6px">viewing</span>' : ""}</td>${perfRowHTML(clientStats(x))}</tr>`).join("")}</tbody></table>
+    <div class="hint" style="margin:12px 0 0">${WITHDRAWAL_NOTE}</div>
   </div>`;
 }
 function perfRowHTML(st) {
@@ -957,6 +914,31 @@ function adminView() {
   </div>
 
   <div class="panel">
+    <h3>Annual returns — portfolio vs S&amp;P 500</h3>
+    <div class="hint">Type each year's return for the portfolio and the S&amp;P 500 (e.g. <b>12.4</b> or <b>-8.3</b>). These drive the chart on the overview — nothing is computed.</div>
+    <table style="max-width:560px">
+      <thead><tr><th style="width:110px">Year</th><th class="num">Portfolio %</th><th class="num">S&amp;P 500 %</th><th style="width:36px"></th></tr></thead>
+      <tbody>
+      ${annualRows().map((r,i) => `
+        <tr>
+          <td><input class="tbl-input tbl-edit" type="number" step="1" value="${r.y}" onchange="app.editAnnual(${r.y},'y',this.value)"></td>
+          <td><input class="tbl-input tbl-edit num" type="number" step="0.1" value="${r.p ?? ""}" placeholder="—" onchange="app.editAnnual(${r.y},'p',this.value)"></td>
+          <td><input class="tbl-input tbl-edit num" type="number" step="0.1" value="${r.s ?? ""}" placeholder="—" onchange="app.editAnnual(${r.y},'s',this.value)"></td>
+          <td><button class="del-btn" title="Remove year" onclick="app.delAnnual(${r.y})">✕</button></td>
+        </tr>`).join("")}
+      ${annualRows().length ? "" : `<tr><td colspan="4" class="muted" style="font-size:13px">No years yet — add one below.</td></tr>`}
+      </tbody>
+    </table>
+    <div class="inline-form" style="margin-top:12px">
+      <div class="field" style="max-width:120px"><label>YEAR</label><input id="an-y" type="number" step="1" value="${new Date().getFullYear()}"></div>
+      <div class="field" style="max-width:150px"><label>PORTFOLIO %</label><input id="an-p" type="number" step="0.1" placeholder="12.4"></div>
+      <div class="field" style="max-width:150px"><label>S&amp;P 500 %</label><input id="an-s" type="number" step="0.1" placeholder="24.2"></div>
+      <button class="btn btn-gold" style="width:auto" onclick="app.addAnnual()">Add year</button>
+    </div>
+    <div class="flash" id="an-flash"></div>
+  </div>
+
+  <div class="panel">
     <h3>Settings</h3>
     <div class="hint">The fund name appears in the header, browser tab, and footer.</div>
     <div class="inline-form" style="margin-bottom:14px">
@@ -1157,6 +1139,38 @@ window.app = {
     c.contributions.splice(j, 1);
     storeAndSync(); render();
   },
+  addAnnual() {
+    const y = parseInt($("an-y").value, 10);
+    const pRaw = $("an-p").value.trim(), sRaw = $("an-s").value.trim();
+    if (!(y > 1900 && y < 2200)) { flash("an-flash", "Enter a valid year.", true); return; }
+    if (!db.annual) db.annual = [];
+    if (db.annual.some(r => r.y === y)) { flash("an-flash", y + " is already listed — edit it in the table above.", true); return; }
+    const p = pRaw === "" ? null : parseFloat(pRaw);
+    const s = sRaw === "" ? null : parseFloat(sRaw);
+    if ((pRaw !== "" && isNaN(p)) || (sRaw !== "" && isNaN(s))) { flash("an-flash", "Returns must be numbers like 12.4 or -8.3.", true); return; }
+    db.annual.push({ y, p, s });
+    storeAndSync(); render();
+    flash("an-flash", y + " added.");
+  },
+  editAnnual(year, key, val) {
+    const r = (db.annual || []).find(x => x.y === year); if (!r) return;
+    val = String(val).trim();
+    if (key === "y") {
+      const n = parseInt(val, 10);
+      if (!(n > 1900 && n < 2200)) { flash("an-flash", "Enter a valid year.", true); render(); return; }
+      if (n !== year && db.annual.some(x => x.y === n)) { flash("an-flash", n + " is already listed.", true); render(); return; }
+      r.y = n;
+    } else {
+      if (val === "") { r[key] = null; }
+      else {
+        const n = parseFloat(val);
+        if (isNaN(n)) { flash("an-flash", "Returns must be numbers like 12.4 or -8.3.", true); render(); return; }
+        r[key] = n;
+      }
+    }
+    storeAndSync(); render();
+  },
+  delAnnual(year) { db.annual = (db.annual || []).filter(r => r.y !== year); storeAndSync(); render(); },
   setYtd(v) {
     v = String(v).trim();
     if (v === "") {
@@ -1194,13 +1208,7 @@ function flashHTML(id, html) {
   el.className = "flash";
 }
 
-function afterRender() {
-  if (state.tab === "overview") {
-    const c = currentClient();
-    if (c) wireAreaChart("cchart", clientSeries(c));
-    else wireAreaChart("fchart", fundSeries());
-  }
-}
+function afterRender() { /* charts are static SVG — nothing to wire up */ }
 
 /* ================= Boot ================= */
 async function enterApp(sess) {
