@@ -116,6 +116,7 @@
   .card .k { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .9px; margin-bottom: 8px; }
   .card .v { font-size: 25px; font-weight: 700; color: var(--navy); letter-spacing: .2px; }
   .card .s { font-size: 13px; color: var(--muted); margin-top: 4px; }
+  .card .disc { font-size: 11px; color: #9aa6b2; margin-top: 7px; line-height: 1.35; border-top: 1px solid var(--line); padding-top: 6px; cursor: help; }
   .pos { color: var(--green); } .neg { color: var(--red); }
 
   .panel { background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 24px; margin-bottom: 26px; }
@@ -191,9 +192,8 @@
    ===================================================== */
 const STORE_KEY = "fund-portal-v3";
 const ASSET_CLASSES = ["US Equity","International Equity","Fixed Income","Alternatives","Cash"];
-const WITHDRAWAL_NOTE = "<b>Note on withdrawals:</b> these figures are net of any funds already withdrawn. " +
-  "A withdrawal redeems units and reduces both principal and current value, so <b>Total gain</b> reflects the position still held — " +
-  "profit taken out in past withdrawals is not included in the gain shown.";
+const WITHDRAWAL_TIP = "Withdrawals are reflected in this figure: redeeming units reduces both principal and current value, " +
+  "so the gain shown is on the position still held — profit already paid out is not counted again here.";
 
 const DEFAULTS = () => ({
   at: 0, // last-edit timestamp, used for cross-device sync
@@ -665,7 +665,7 @@ function overviewView() {
     <div class="cards">
       <div class="card accent"><div class="k">Fund market value</div><div class="v">${fmtMoney(mv)}</div><div class="s">${db.holdings.length} positions + cash</div></div>
       <div class="card"><div class="k">Principal invested</div><div class="v">${fmtMoney(tp)}</div><div class="s">${db.clients.length} investors</div></div>
-      <div class="card"><div class="k">Total gain</div><div class="v ${pctClass(gain)}">${fmtMoney(gain)}</div><div class="s ${pctClass(gain)}">${fmtPct(gp)} vs principal</div></div>
+      <div class="card"><div class="k">Total gain</div><div class="v ${pctClass(gain)}">${fmtMoney(gain)}</div><div class="s ${pctClass(gain)}">${fmtPct(gp)} vs principal</div><div class="disc" title="${esc(WITHDRAWAL_TIP)}">Includes the effect of withdrawals</div></div>
       <div class="card"><div class="k">YTD</div><div class="v ${ytd==null?'':pctClass(ytd)}">${ytd==null?"—":fmtPct(ytd)}</div><div class="s">${ytd==null?"set in Admin → Settings":"as of " + new Date().toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</div></div>
     </div>
     <div class="panel">
@@ -678,7 +678,6 @@ function overviewView() {
       <div class="hint">Each investor's position, marked to the latest prices</div>
       <table><thead><tr><th>Investor</th><th class="num">Principal</th><th class="num">Ownership</th><th class="num">Current value</th><th class="num">Gain ($)</th><th class="num">Gain (%)</th></tr></thead>
       <tbody>${db.clients.map(x => `<tr><td>${esc(x.name)}</td>${perfRowHTML(clientStats(x))}</tr>`).join("")}</tbody></table>
-      <div class="hint" style="margin:12px 0 0">${WITHDRAWAL_NOTE}</div>
     </div>`;
   }
   const st = clientStats(c);
@@ -690,7 +689,7 @@ function overviewView() {
   <div class="cards">
     <div class="card accent"><div class="k">Account value</div><div class="v">${fmtMoney(st.value)}</div><div class="s">${(st.frac*100).toFixed(1)}% ownership of fund</div></div>
     <div class="card"><div class="k">Principal invested</div><div class="v">${fmtMoney(st.principal)}</div><div class="s">first investment ${st.firstYm ? monthLabel(st.firstYm) : "—"}</div></div>
-    <div class="card"><div class="k">Total gain</div><div class="v ${pctClass(st.gain)}">${fmtMoney(st.gain)}</div><div class="s ${pctClass(st.gain)}">${fmtPct(st.gainPct)} on principal</div></div>
+    <div class="card"><div class="k">Total gain</div><div class="v ${pctClass(st.gain)}">${fmtMoney(st.gain)}</div><div class="s ${pctClass(st.gain)}">${fmtPct(st.gainPct)} on principal</div><div class="disc" title="${esc(WITHDRAWAL_TIP)}">Includes the effect of withdrawals</div></div>
     <div class="card"><div class="k">Fund market value</div><div class="v">${fmtMoney(mv)}</div><div class="s">marked to latest prices</div></div>
   </div>
   <div class="panel">
@@ -703,7 +702,6 @@ function overviewView() {
     <div class="hint">All investors, marked to the latest prices</div>
     <table><thead><tr><th>Investor</th><th class="num">Principal</th><th class="num">Ownership</th><th class="num">Current value</th><th class="num">Gain ($)</th><th class="num">Gain (%)</th></tr></thead>
     <tbody>${db.clients.map(x => `<tr><td>${esc(x.name)}${String(x.id)===String(c.id) ? ' <span class="pill" style="margin-left:6px">viewing</span>' : ""}</td>${perfRowHTML(clientStats(x))}</tr>`).join("")}</tbody></table>
-    <div class="hint" style="margin:12px 0 0">${WITHDRAWAL_NOTE}</div>
   </div>`;
 }
 function perfRowHTML(st) {
