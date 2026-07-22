@@ -202,6 +202,7 @@ const DEFAULTS = () => ({
   key: "", // optional Finnhub API key (extra quote source)
   ytd: null, // YTD return in %, entered by the manager in Settings (null = show —)
   annual: [], // yearly returns entered by the manager: [{ y: 2025, p: 12.4, s: 24.2 }]
+  fees: { total: null, taken: null }, // fee tracking (USD), entered by the manager; remaining is derived
   holdings: [
     { t:"SPY",   name:"SPDR S&P 500 ETF",         cls:"US Equity",            sh:3000, fb:560 },
     { t:"AAPL",  name:"Apple Inc.",                cls:"US Equity",            sh:4000, fb:210 },
@@ -465,6 +466,11 @@ function unitsOf(c, uptoYm) {
 function totalUnits(uptoYm) { return db.clients.reduce((s,c) => s + unitsOf(c, uptoYm), 0); }
 function unitPrice() { const tu = totalUnits(); return tu > 0 ? marketValue() / tu : 1; }
 function fracOf(c, uptoYm) { const tu = totalUnits(uptoYm); return tu ? unitsOf(c, uptoYm) / tu : 0; }
+function withdrawnOf(c) { return (c.withdrawals || []).reduce((s,w) => s + (w.amount || 0), 0); }
+function totalWithdrawn() { return db.clients.reduce((s,c) => s + withdrawnOf(c), 0); }
+function feesTotal() { const v = db.fees && db.fees.total; return (typeof v === "number") ? v : null; }
+function feesTaken() { const v = db.fees && db.fees.taken; return (typeof v === "number") ? v : 0; }
+function feesRemaining() { const t = feesTotal(); return t == null ? null : t - feesTaken(); }
 /* The fund's YTD figure is entered manually in Settings (e.g. from IBKR) — never computed. */
 function manualYtd() { return (db.ytd === null || db.ytd === undefined || db.ytd === "") ? null : db.ytd / 100; }
 
@@ -667,18 +673,22 @@ function overviewView() {
       <div class="card"><div class="k">Principal invested</div><div class="v">${fmtMoney(tp)}</div><div class="s">${db.clients.length} investors</div></div>
       <div class="card"><div class="k">Total gain</div><div class="v ${pctClass(gain)}">${fmtMoney(gain)}</div><div class="s ${pctClass(gain)}">${fmtPct(gp)} vs principal</div><div class="disc" title="${esc(WITHDRAWAL_TIP)}">Includes the effect of withdrawals</div></div>
       <div class="card"><div class="k">YTD</div><div class="v ${ytd==null?'':pctClass(ytd)}">${ytd==null?"—":fmtPct(ytd)}</div><div class="s">${ytd==null?"set in Admin → Settings":"as of " + new Date().toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})}</div></div>
+      <div class="card"><div class="k">Total withdrawn</div><div class="v">${fmtMoney(totalWithdrawn())}</div><div class="s">paid out to investors to date</div></div>
     </div>
     <div class="panel">
       <h3>Portfolio vs S&amp;P 500</h3>
       <div class="hint">Annual returns, as reported by the fund manager</div>
       ${barCompareHTML(annualRows())}
+      ${annualTableHTML(annualRows())}
     </div>
     <div class="panel">
       <h3>Investor performance</h3>
       <div class="hint">Each investor's position, marked to the latest prices</div>
       <table><thead><tr><th>Investor</th><th class="num">Principal</th><th class="num">Ownership</th><th class="num">Current value</th><th class="num">Gain ($)</th><th class="num">Gain (%)</th></tr></thead>
       <tbody>${db.clients.map(x => `<tr><td>${esc(x.name)}</td>${perfRowHTML(clientStats(x))}</tr>`).join("")}</tbody></table>
-    </div>`;
+    </div>
+    ${withdrawalsPanel()}
+    ${feesPanel()}`;
   }
   const st = clientStats(c);
   return `
@@ -691,6 +701,7 @@ function overviewView() {
     <div class="card"><div class="k">Principal invested</div><div class="v">${fmtMoney(st.principal)}</div><div class="s">first investment ${st.firstYm ? monthLabel(st.firstYm) : "—"}</div></div>
     <div class="card"><div class="k">Total gain</div><div class="v ${pctClass(st.gain)}">${fmtMoney(st.gain)}</div><div class="s ${pctClass(st.gain)}">${fmtPct(st.gainPct)} on principal</div><div class="disc" title="${esc(WITHDRAWAL_TIP)}">Includes the effect of withdrawals</div></div>
     <div class="card"><div class="k">Fund market value</div><div class="v">${fmtMoney(mv)}</div><div class="s">marked to latest prices</div></div>
+    ${withdrawnOf(c) > 0 ? `<div class="card"><div class="k">Withdrawn to date</div><div class="v">${fmtMoney(withdrawnOf(c))}</div><div class="s">paid out to this investor</div></div>` : ""}
   </div>
   <div class="panel">
     <h3>Portfolio vs S&amp;P 500</h3>
@@ -702,6 +713,52 @@ function overviewView() {
     <div class="hint">All investors, marked to the latest prices</div>
     <table><thead><tr><th>Investor</th><th class="num">Principal</th><th class="num">Ownership</th><th class="num">Current value</th><th class="num">Gain ($)</th><th class="num">Gain (%)</th></tr></thead>
     <tbody>${db.clients.map(x => `<tr><td>${esc(x.name)}${String(x.id)===String(c.id) ? ' <span class="pill" style="margin-left:6px">viewing</span>' : ""}</td>${perfRowHTML(clientStats(x))}</tr>`).join("")}</tbody></table>
+  </div>
+  ${feesPanel()}`;
+}
+function annualTableHTML(rows) {
+  if (!rows.length) return "";
+  return `<table style="max-width:520px;margin-top:16px">
+    <thead><tr><th>Year</th><th class="num">Portfolio</th><th class="num">S&amp;P 500</th><th class="num">+/−</th></tr></thead>
+    <tbody>${rows.map(r => {
+      const diff = (r.p != null && r.s != null) ? r.p - r.s : null;
+      return `<tr><td>${r.y}</td>
+        <td class="num ${r.p==null?'':pctClass(r.p)}">${r.p==null?"—":fmtPct(r.p/100)}</td>
+        <td class="num ${r.s==null?'':pctClass(r.s)}">${r.s==null?"—":fmtPct(r.s/100)}</td>
+        <td class="num ${diff==null?'':pctClass(diff)}">${diff==null?"—":(diff>0?"+":"")+diff.toFixed(1)+" pts"}</td></tr>`;
+    }).join("")}</tbody></table>`;
+}
+function feesPanel() {
+  const t = feesTotal(), taken = feesTaken(), rem = feesRemaining();
+  return `<div class="panel">
+    <h3>Fees</h3>
+    <div class="hint">Management/performance fees for the fund, as recorded by the manager</div>
+    <div class="cards" style="margin-bottom:0">
+      <div class="card"><div class="k">Total fees</div><div class="v">${t==null?"—":fmtMoney(t)}</div><div class="s">${t==null?"set in Admin → Fees":"agreed / accrued to date"}</div></div>
+      <div class="card"><div class="k">Fees taken</div><div class="v">${fmtMoney(taken)}</div><div class="s">collected so far</div></div>
+      <div class="card accent"><div class="k">Fees remaining</div><div class="v">${rem==null?"—":fmtMoney(rem)}</div><div class="s">still to be collected</div></div>
+    </div>
+  </div>`;
+}
+function withdrawalsPanel() {
+  const rows = db.clients
+    .map(c => ({ c, total: withdrawnOf(c), list: (c.withdrawals || []) }))
+    .filter(r => r.total > 0)
+    .sort((a,b) => b.total - a.total);
+  const tot = totalWithdrawn();
+  const body = rows.length
+    ? `<table><thead><tr><th>Investor</th><th>History</th><th class="num">Total withdrawn</th></tr></thead>
+        <tbody>${rows.map(r => `<tr>
+          <td>${esc(r.c.name)}</td>
+          <td class="muted" style="font-size:13px">${r.list.map(w => monthLabel(w.ym) + " · " + fmtMoney(w.amount)).join("<br>")}</td>
+          <td class="num">${fmtMoney(r.total)}</td></tr>`).join("")}
+          <tr><td colspan="2" style="text-align:right;font-weight:700;color:var(--navy)">Total</td><td class="num" style="font-weight:700;color:var(--navy)">${fmtMoney(tot)}</td></tr>
+        </tbody></table>`
+    : `<div class="hint" style="margin:0">No withdrawals recorded yet.</div>`;
+  return `<div class="panel">
+    <h3>Withdrawals</h3>
+    <div class="hint">Funds paid out to investors, at the exit price recorded for each</div>
+    ${body}
   </div>`;
 }
 function perfRowHTML(st) {
@@ -937,6 +994,20 @@ function adminView() {
   </div>
 
   <div class="panel">
+    <h3>Fees</h3>
+    <div class="hint">Enter the fund's total fees and how much has been collected. <b>Fees remaining</b> is computed as total − taken.</div>
+    <div class="inline-form">
+      <div class="field" style="max-width:180px"><label>TOTAL FEES (USD)</label>
+        <input id="fee-total" type="number" step="100" value="${feesTotal() ?? ""}" placeholder="e.g. 25000" onchange="app.editFees('total',this.value)"></div>
+      <div class="field" style="max-width:180px"><label>FEES TAKEN (USD)</label>
+        <input id="fee-taken" type="number" step="100" value="${(db.fees && typeof db.fees.taken === 'number') ? db.fees.taken : ''}" placeholder="e.g. 10000" onchange="app.editFees('taken',this.value)"></div>
+      <div class="field" style="max-width:180px"><label>FEES REMAINING</label>
+        <input type="text" value="${feesRemaining()==null ? '—' : fmtMoney(feesRemaining())}" disabled style="background:#f1efe8"></div>
+    </div>
+    <div class="flash" id="fee-flash"></div>
+  </div>
+
+  <div class="panel">
     <h3>Settings</h3>
     <div class="hint">The fund name appears in the header, browser tab, and footer.</div>
     <div class="inline-form" style="margin-bottom:14px">
@@ -1084,6 +1155,8 @@ window.app = {
     } else {
       for (const k of c.contributions) { k.units = (k.units > 0 ? k.units : k.amount) * (1 - frac); k.amount = k.amount * (1 - frac); }
     }
+    if (!c.withdrawals) c.withdrawals = [];
+    c.withdrawals.push({ ym, amount: amt, units: unitsOut, price: xprice }); // record for the withdrawals section
     db.cash = (db.cash || 0) - amt; // cash paid out of the fund
     storeAndSync(); render();
     flash("wd-flash", fmtMoney(amt) + " withdrawn for " + c.name + " at " + fmtPrice(xprice) + "/unit (" +
@@ -1169,6 +1242,19 @@ window.app = {
     storeAndSync(); render();
   },
   delAnnual(year) { db.annual = (db.annual || []).filter(r => r.y !== year); storeAndSync(); render(); },
+  editFees(key, val) {
+    if (!db.fees) db.fees = { total: null, taken: null };
+    val = String(val).trim();
+    if (val === "") { db.fees[key] = null; }
+    else {
+      const n = parseFloat(val);
+      if (isNaN(n) || n < 0) { flash("fee-flash", "Enter a valid amount (0 or more).", true); render(); return; }
+      db.fees[key] = n;
+    }
+    storeAndSync(); render();
+    const rem = feesRemaining();
+    flash("fee-flash", "Fees updated" + (rem == null ? "." : " — remaining " + fmtMoney(rem) + "."));
+  },
   setYtd(v) {
     v = String(v).trim();
     if (v === "") {

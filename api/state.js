@@ -30,13 +30,15 @@ export default async function handler(req, res) {
         cash: state.cash,
         ytd: state.ytd ?? null,          // manager-reported YTD figure
         annual: state.annual || [],      // manager-entered yearly returns vs S&P 500
+        fees: state.fees || { total: null, taken: null }, // fee tracking
         holdings: state.holdings,
         quotes: state.quotes,
         clients: (state.clients || []).map(x => ({
           id: x.id,
           name: x.name,
           email: "", // emails stay private to the admin
-          contributions: x.contributions || []
+          contributions: x.contributions || [],
+          withdrawals: x.withdrawals || []
         })),
         investorMode: true
       };
